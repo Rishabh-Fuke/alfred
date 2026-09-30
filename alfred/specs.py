@@ -77,10 +77,21 @@ class ActionSpec:
 
 @dataclass
 class EmailSpec(ActionSpec):
+    """An email to `to` whose text matches every group.
+
+    If `via_update_event` is set, the email is a notification about that event, and an approved change to the
+    event that emails the update to everyone in `to` also counts (the way calendar apps notify attendees).
+    """
     to: frozenset
     groups: tuple[Group, ...] = ()
     wrong_target_feedback: str = ""
+    via_update_event: str = ""
     kinds = ("email",)
+
+    def notified_by_update(self, action: dict) -> bool:
+        return bool(self.via_update_event and action["kind"] == "event_change"
+                    and action["event_id"] == self.via_update_event
+                    and self.to <= {x.lower() for x in action.get("notify", [])})
 
     def check(self, action, ctx):
         v = _check_recipients(action, self.to, ctx, self.wrong_target_feedback)

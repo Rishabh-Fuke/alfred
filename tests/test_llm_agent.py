@@ -24,9 +24,20 @@ def test_parse_json_tool_call():
     assert parse_json_tool_call('{"tool": "finish", "arguments": {') == MALFORMED
 
 
+def test_parse_json_tool_call_infers_the_tool_from_unambiguous_keys():
+    # Seen from gpt-oss in the baseline: a finish call and an ask_user call written without the tool name.
+    bare_finish = '{"message":"I don\'t have the capability to make phone calls.", "status":"cannot_do"}'
+    assert parse_json_tool_call(bare_finish) == ("finish", {"message": "I don't have the capability to make "
+                                                                      "phone calls.", "status": "cannot_do"})
+    assert parse_json_tool_call('{"question": "Which Priya?"}') == ("ask_user", {"question": "Which Priya?"})
+    assert parse_json_tool_call('{"status": "shipped", "carrier": "x"}') == MALFORMED  # fits no tool
+
+
 def test_strip_think():
     assert strip_think("<think>hmm</think>Hello") == "Hello"
     assert strip_think("reasoning that started in the template</think>Answer") == "Answer"
+    assert strip_think("<|channel|>analysis<|message|>thinking<|end|><|start|>assistant<|channel|>final"
+                       "<|message|>It's at 3 PM.") == "It's at 3 PM."
 
 
 def test_prompts():
@@ -60,6 +71,24 @@ def test_native_agent_recovers_calls_written_as_text():
     stats = agent.run(env)
     m = env.metrics()
     assert stats["recovered_calls"] == 1 and m["implicit_finish"] and m["success"]
+    assert m["format_issues"] == 2 and not m["clean_format"]  # a recovered call and a plain-text ending
+
+
+def test_extra_body_is_sent_with_every_request():
+    seen = []
+
+    class Client(_StubClient):
+        def _create(self, **kw):
+            seen.append(kw.get("extra_body"))
+            return super()._create(**kw)
+
+    task = next(t for t in generate_tasks(1000, 1) if t.template == "impossible_request")
+    body = {"chat_template_kwargs": {"enable_thinking": False}}
+    agent = OpenAICompatAgent("stub", client=Client(['{"status": "cannot_do", "message": "I can\'t do that."}']),
+                              extra_body=body)
+    env = Environment(task)
+    agent.run(env)
+    assert seen == [body] and env.metrics()["success"]
 
 
 @pytest.mark.parametrize("mode", ["native", "json"])

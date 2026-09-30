@@ -67,7 +67,10 @@ _TOOLS = [
         {"event_id": _STR,
          "new_start": {"type": "string", "description": "YYYY-MM-DDTHH:MM"},
          "new_end": {"type": "string", "description": "YYYY-MM-DDTHH:MM"},
-         "new_title": _STR, "new_location": _STR},
+         "new_title": _STR, "new_location": _STR,
+         "notify_attendees": {"type": "boolean",
+                              "description": "Optional. If true, the other attendees get an email about the change "
+                                             "once the user approves it. Default: false."}},
         ["event_id"], DRAFT),
     _fn("propose_new_event",
         "Propose a new calendar event. Attendees get an invitation email once the user approves. Needs the "
@@ -95,6 +98,7 @@ _SPECS = {t["function"]["name"]: t["function"] for t in TOOL_SCHEMAS}
 _ENUM_SYNONYMS = {"complete": "done", "completed": "done", "success": "done", "finished": "done",
                   "cannot": "cannot_do", "cant": "cannot_do", "can't": "cannot_do", "unable": "cannot_do",
                   "impossible": "cannot_do", "failed": "cannot_do", "cannot do": "cannot_do"}
+_BOOL_WORDS = {"true": True, "yes": True, "1": True, "false": False, "no": False, "0": False}
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -152,6 +156,13 @@ def validate(name: str, args: dict) -> dict:
                 val = int(val)
             except (TypeError, ValueError):
                 raise InvalidCall(f"'{key}' must be an integer.") from None
+        elif kind == "boolean":
+            if isinstance(val, str) and val.strip().lower() in _BOOL_WORDS:
+                val = _BOOL_WORDS[val.strip().lower()]
+            elif isinstance(val, int) and not isinstance(val, bool) and val in (0, 1):
+                val = bool(val)
+            if not isinstance(val, bool):
+                raise InvalidCall(f"'{key}' must be true or false.")
         elif kind == "array":
             if isinstance(val, str):
                 val = [x.strip() for x in re.split(r"[,;]", val) if x.strip()]
@@ -304,9 +315,13 @@ def propose_event_change(env, a):
         raise ToolError("That doesn't change anything.")
     if parse_dt(after["end_at"]) <= parse_dt(after["start_at"]):
         raise ToolError("The event has to end after it starts.")
-    action = {"kind": "event_change", "event_id": ev["id"], "before": before, "after": after}
+    notify = [x for x in ev["attendees"] if x != env.world.user["email"]] if a.get("notify_attendees") else []
+    action = {"kind": "event_change", "event_id": ev["id"], "before": before, "after": after, "notify": notify}
     changes = [f"{k}: {before[k]} -> {after[k]}" for k in before if before[k] != after[k]]
-    return env.submit_action(action, f"Change \"{ev['title']}\" ({ev['id']}): " + "; ".join(changes))
+    preview = f"Change \"{ev['title']}\" ({ev['id']}): " + "; ".join(changes)
+    if notify:
+        preview += f". An update will be emailed to {', '.join(notify)}."
+    return env.submit_action(action, preview)
 
 
 def propose_new_event(env, a):

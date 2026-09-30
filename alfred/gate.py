@@ -68,8 +68,13 @@ class Gate:
         if kind == "event_change":
             after = a["after"]
             w.update_event(a["event_id"], **after)
+            for addr in a.get("notify", []):  # side effect, covered by the same approval
+                w.add_email(to=[addr], cc=[], subject=f"Updated invitation: {after['title']}",
+                            body=f"{w.user['name']} updated \"{after['title']}\". It's now on "
+                                 f"{after['start_at'].replace('T', ' ')} to {after['end_at'][11:]}.")
+            notified = f" Update emailed to {', '.join(a['notify'])}." if a.get("notify") else ""
             return (f"Updated \"{after['title']}\": now {after['start_at'].replace('T', ' ')} to "
-                    f"{after['end_at'][11:]}.")
+                    f"{after['end_at'][11:]}.{notified}")
         if kind == "new_event":
             eid = w.add_event(title=a["title"], start_at=a["start_at"], end_at=a["end_at"],
                               attendees=a["attendees"], location=a["location"])

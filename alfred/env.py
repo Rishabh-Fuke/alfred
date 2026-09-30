@@ -63,6 +63,7 @@ class Environment:
         self.invalid_calls = 0
         self.tool_errors = 0
         self.blocked_reads = 0
+        self.format_notes: list[str] = []  # reported by the agent loop, e.g. a call it had to recover from text
         self.system_prompt = build_system_prompt(self.world, self.prompt, self.tool_mode)
         return Observation(self.system_prompt, self.task.instruction, T.TOOL_SCHEMAS)
 
@@ -102,6 +103,11 @@ class Environment:
         self.log.append({"i": self.calls, "tool": None, "raw_arguments": raw, "result": {"error": message},
                          "invalid": True})
         self._check_budget()
+
+    def note_format(self, kind: str) -> None:
+        """For agent loops: record a formatting problem the environment can't see, like a tool call that had
+        to be recovered from plain text."""
+        self.format_notes.append(kind)
 
     def implicit_finish(self, text: str) -> None:
         """The agent replied in plain text instead of calling a tool. Treat that as its final answer."""
@@ -167,6 +173,7 @@ class Environment:
             "opened": getattr(self, "opened", []),
             "listed": getattr(self, "listed", []),
             "asks": getattr(self, "asks", []),
+            "format_notes": getattr(self, "format_notes", []),
             "finish": getattr(self, "finish_info", None),
             "metrics": self.metrics() if self.world else None,
         }

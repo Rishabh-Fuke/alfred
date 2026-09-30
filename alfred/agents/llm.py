@@ -15,7 +15,11 @@ import time
 from ..tools import TOOL_NAMES
 
 _THINK = re.compile(r"<think>.*?</think>", re.S)
+_HARMONY = re.compile(r"<\|(?:start|end|channel|message|constrain|return|call)\|>")
 MALFORMED = "malformed"
+
+# A JSON object with no tool name whose keys only fit one tool, e.g. {"status": ..., "message": ...}.
+_KEYS_TO_TOOL = [({"status", "message"}, "finish"), ({"question"}, "ask_user")]
 
 
 def strip_think(text: str | None) -> str:
@@ -23,14 +27,25 @@ def strip_think(text: str | None) -> str:
     text = _THINK.sub("", text or "")
     if "</think>" in text:  # the opening tag was part of the chat template
         text = text.split("</think>", 1)[1]
-    return text.strip()
+    if "<|message|>" in text:  # harmony-format debris: keep the last message
+        text = text.rsplit("<|message|>", 1)[1]
+    return _HARMONY.sub("", text).strip()
+
+
+def _infer_tool(obj: dict):
+    keys = set(obj)
+    for needed, tool in _KEYS_TO_TOOL:
+        if needed <= keys and keys <= needed | {"reason", "note"}:
+            return tool
+    return None
 
 
 def parse_json_tool_call(text: str):
     """Find a tool call written as JSON in plain text.
 
     Returns (name, arguments), MALFORMED if the text looks like an attempted call that doesn't
-    parse, or None if there's no attempt at all.
+    parse, or None if there's no attempt at all. A bare {"status": ..., "message": ...} counts as
+    finish and a bare {"question": ...} as ask_user, since those keys fit only one tool.
     """
     if not text or "{" not in text:
         return None
@@ -49,6 +64,9 @@ def parse_json_tool_call(text: str):
         fn = obj.get("function") if isinstance(obj.get("function"), dict) else obj
         name = fn.get("tool") or fn.get("name") or (obj.get("function") if isinstance(obj.get("function"), str) else None)
         if not isinstance(name, str):
+            inferred = _infer_tool(obj)
+            if inferred:
+                return inferred, {k: v for k, v in obj.items() if k not in ("reason", "note")}
             continue
         args = fn.get("arguments", fn.get("args", fn.get("parameters", fn.get("input", {}))))
         if isinstance(args, str):
@@ -94,11 +112,13 @@ def chat_create(client, model: str, **kw):
 class OpenAICompatAgent:
     def __init__(self, model: str, base_url: str = "http://localhost:11434/v1", api_key: str | None = None,
                  temperature: float = 0.0, max_tokens: int = 4096, seed: int | None = None,
-                 tool_mode: str = "native", timeout: float = 600.0, client=None):
+                 tool_mode: str = "native", timeout: float = 600.0, client=None, extra_body: dict | None = None):
+        """extra_body is sent as-is with every request, e.g. {"chat_template_kwargs": {"enable_thinking": False}}
+        to turn off reasoning on vLLM-served Nemotron and Qwen models."""
         if tool_mode not in ("native", "json"):
             raise ValueError("tool_mode must be 'native' or 'json'")
         self.model, self.temperature, self.max_tokens = model, temperature, max_tokens
-        self.seed, self.tool_mode = seed, tool_mode
+        self.seed, self.tool_mode, self.extra_body = seed, tool_mode, extra_body
         if client is None:
             from openai import OpenAI
             client = OpenAI(base_url=base_url, api_key=api_key or os.environ.get("OPENAI_API_KEY") or "local",
@@ -112,6 +132,8 @@ class OpenAICompatAgent:
             kw["tools"] = tools
         if self.seed is not None:
             kw["seed"] = self.seed
+        if self.extra_body:
+            kw["extra_body"] = self.extra_body
         return chat_create(self.client, self.model, **kw)
 
     def run(self, env) -> dict:
@@ -150,7 +172,9 @@ class OpenAICompatAgent:
                 messages.append({"role": "assistant", "content": content})
                 if isinstance(parsed, tuple) and (not native or parsed[0] in TOOL_NAMES):
                     # json mode, or a native-mode model that wrote its call as text
-                    stats["recovered_calls"] += int(native)
+                    if native:
+                        stats["recovered_calls"] += 1
+                        env.note_format("recovered_call")
                     name, args = parsed
                     messages.append({"role": "user", "content": f"Result of {name}:\n{env.call_tool(name, args)}"})
                 elif parsed == MALFORMED and not native:
