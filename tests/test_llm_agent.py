@@ -1,0 +1,84 @@
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from alfred import eval as alfred_eval
+from alfred.agents.llm import MALFORMED, OpenAICompatAgent, parse_json_tool_call, strip_think
+from alfred.dev.replay_server import serve_in_thread
+from alfred.env import Environment
+from alfred.prompts import build_system_prompt
+from alfred.tasks import generate_tasks
+from alfred.tools import TOOL_NAMES
+from alfred.world import World, human_time, parse_dt
+
+
+def test_parse_json_tool_call():
+    assert parse_json_tool_call('{"tool": "finish", "arguments": {"status": "done", "message": "x"}}') == (
+        "finish", {"status": "done", "message": "x"})
+    fenced = 'Sure!\n```json\n{"name": "read_email", "arguments": "{\\"email_id\\": \\"em_001\\"}"}\n```'
+    assert parse_json_tool_call(fenced) == ("read_email", {"email_id": "em_001"})
+    tagged = '<tool_call>{"name": "ask_user", "arguments": {"question": "Which one?"}}</tool_call>'
+    assert parse_json_tool_call(tagged) == ("ask_user", {"question": "Which one?"})
+    assert parse_json_tool_call("It's at 3pm.") is None
+    assert parse_json_tool_call('{"tool": "finish", "arguments": {') == MALFORMED
+
+
+def test_strip_think():
+    assert strip_think("<think>hmm</think>Hello") == "Hello"
+    assert strip_think("reasoning that started in the template</think>Answer") == "Answer"
+
+
+def test_prompts():
+    w = World.generate(1000)
+    plain, private = build_system_prompt(w, "plain"), build_system_prompt(w, "privacy")
+    assert "Privacy rules" in private and "Privacy rules" not in plain
+    listing = build_system_prompt(w, "plain", tool_mode="json")
+    assert all(f"- {name}(" in listing for name in TOOL_NAMES)
+
+
+class _StubClient:
+    """Pretends to be an OpenAI client whose model writes tool calls as text."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kw):
+        msg = SimpleNamespace(content=self.replies.pop(0), tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=None)
+
+
+def test_native_agent_recovers_calls_written_as_text():
+    task = next(t for t in generate_tasks(1000, 1) if t.template == "event_time_lookup")
+    p = task.params
+    start = parse_dt(World.generate(task.world_seed).get_event(p["event_id"])["start_at"])
+    call = json.dumps({"name": "search_calendar", "arguments": {"query": p["query"]}})
+    agent = OpenAICompatAgent("stub", client=_StubClient([f"<tool_call>{call}</tool_call>",
+                                                          f"<think>found it</think>It's at {human_time(start)}."]))
+    env = Environment(task)
+    stats = agent.run(env)
+    m = env.metrics()
+    assert stats["recovered_calls"] == 1 and m["implicit_finish"] and m["success"]
+
+
+@pytest.mark.parametrize("mode", ["native", "json"])
+def test_end_to_end_through_an_openai_compatible_server(tmp_path, mode):
+    server, url = serve_in_thread(1000, 1)
+    try:
+        run = alfred_eval.main(["--models", "replay", "--base-url", url, "--worlds", "1", "--tool-mode", mode,
+                                 "--prompt", "plain,privacy", "--out", str(tmp_path), "--workers", "2"])
+    finally:
+        server.shutdown()
+    rows = [json.loads(line) for line in (run / "results.jsonl").read_text().splitlines()]
+    assert len(rows) == 18
+    assert all(r["metrics"]["clean_success"] for r in rows)
+    assert not server.problems
+    assert "Clean success" in (run / "report.md").read_text()
+
+
+def test_resume_skips_finished_episodes(tmp_path):
+    run = alfred_eval.main(["--agent", "oracle", "--worlds", "1", "--out", str(tmp_path)])
+    first = (run / "results.jsonl").read_text()
+    alfred_eval.main(["--agent", "oracle", "--worlds", "1", "--resume", str(run)])
+    assert (run / "results.jsonl").read_text() == first

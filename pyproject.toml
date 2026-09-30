@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alfred"
+version = "0.1.0"
+description = "RL environment and eval harness for private, local personal agents"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["openai>=1.40"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["alfred*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
