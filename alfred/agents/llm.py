@@ -101,6 +101,9 @@ def chat_create(client, model: str, **kw):
             if "max_tokens" in msg and "max_completion_tokens" in msg and fix["token_param"] == "max_tokens":
                 fix["token_param"] = "max_completion_tokens"
                 continue
+            if "extra_body" in args and "extra_body" not in fix["drop"] and "chat_template_kwargs" in msg:
+                fix["drop"].add("extra_body")  # this host doesn't take template options; run without them
+                continue
             bad = next((p for p in ("temperature", "seed", "top_p") if p in args and p not in fix["drop"]
                         and p in msg and ("unsupported" in msg or "not supported" in msg)), None)
             if bad is None:
@@ -121,8 +124,8 @@ class OpenAICompatAgent:
         self.seed, self.tool_mode, self.extra_body = seed, tool_mode, extra_body
         if client is None:
             from openai import OpenAI
-            client = OpenAI(base_url=base_url, api_key=api_key or os.environ.get("OPENAI_API_KEY") or "local",
-                            timeout=timeout, max_retries=3)
+            env_key = os.environ.get("OPENAI_API_KEY") if "api.openai.com" in base_url else None
+            client = OpenAI(base_url=base_url, api_key=api_key or env_key or "local", timeout=timeout, max_retries=3)
         self.client = client
         self.messages: list[dict] = []
 

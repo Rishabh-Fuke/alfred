@@ -36,6 +36,35 @@ def test_chat_create_adapts_and_remembers():
     assert len(client.calls) == n + 1  # learned: no extra failed calls the second time
 
 
+def test_chat_create_drops_template_options_a_host_rejects():
+    _PARAM_FIXES.pop("no-kwargs", None)
+    calls = []
+
+    def create(**kw):
+        calls.append(kw)
+        if "extra_body" in kw:
+            raise Exception("400: unknown field 'chat_template_kwargs'")
+        return "ok"
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    body = {"chat_template_kwargs": {"enable_thinking": False}}
+    assert chat_create(client, "no-kwargs", messages=[], max_tokens=5, extra_body=body) == "ok"
+    assert "extra_body" not in calls[-1]
+
+
+def test_provider_shortcuts_and_keys(monkeypatch):
+    monkeypatch.setenv("NEBIUS_API_KEY", "nb-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert alfred_eval.resolve_endpoint("tokenfactory", None) == ("https://api.tokenfactory.nebius.com/v1/", "nb-test")
+    assert alfred_eval.resolve_endpoint("openai", None) == ("https://api.openai.com/v1", "sk-test")
+    # Keys never go to a different host.
+    assert alfred_eval.resolve_endpoint("ollama", None) == ("http://localhost:11434/v1", "local")
+    assert alfred_eval.resolve_endpoint("http://x:1/v1", None) == ("http://x:1/v1", "local")
+    assert alfred_eval.resolve_endpoint("http://x:1/v1", "k") == ("http://x:1/v1", "k")
+    a = alfred_eval.parse_args(["--no-think", "--extra-body", '{"top_k": 20}'])
+    assert alfred_eval.extra_body(a) == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
+
+
 def test_chat_create_reraises_other_errors():
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
         create=lambda **kw: (_ for _ in ()).throw(RuntimeError("connection refused")))))

@@ -197,8 +197,11 @@ def main(argv=None):
     p.add_argument("runs", nargs="+", help="Run directories (each has a results.jsonl).")
     p.add_argument("--out", default="", help="Also write the markdown report to this file.")
     a = p.parse_args(argv)
-    rows = [r for d in a.runs for r in load_rows(Path(d))]
-    meta = json.loads((Path(a.runs[0]) / "config.json").read_text()) if len(a.runs) == 1 else None
+    runs = [Path(d) for d in a.runs if (Path(d) / "results.jsonl").exists()]  # so a glob can include loose files
+    if not runs:
+        p.error("none of those paths is a run directory with a results.jsonl")
+    rows = [r for d in runs for r in load_rows(d)]
+    meta = json.loads((runs[0] / "config.json").read_text()) if len(runs) == 1 else None
     text = render_markdown(summarize(rows), meta)
     if a.out:
         Path(a.out).write_text(text)

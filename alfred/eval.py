@@ -29,6 +29,14 @@ from .tasks import TEMPLATES, generate_tasks
 OLLAMA_NOTE = ("Note: Ollama's default context window is small, and it silently cuts off long prompts. "
                "Start it with OLLAMA_CONTEXT_LENGTH=16384 (see the README) or results will look worse than they are.")
 
+# Shortcuts for --base-url, and the environment variable each one reads its API key from.
+PROVIDERS = {
+    "ollama": ("http://localhost:11434/v1", None),
+    "vllm": ("http://localhost:8000/v1", None),
+    "tokenfactory": ("https://api.tokenfactory.nebius.com/v1/", "NEBIUS_API_KEY"),
+    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+}
+
 _clients: dict = {}
 _clients_lock = threading.Lock()
 
@@ -37,14 +45,31 @@ def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_")
 
 
+def resolve_endpoint(base_url: str, api_key: str | None) -> tuple[str, str]:
+    """A provider shortcut or URL, plus the key to use: --api-key, else that provider's own variable, else a dummy.
+
+    A key from the environment only ever goes to its own provider, never to another URL.
+    """
+    url = PROVIDERS.get(base_url, (base_url, None))[0]
+    env_var = next((var for u, var in PROVIDERS.values() if var and u.split("/")[2] in url), None)
+    key = api_key or (os.environ.get(env_var) if env_var else None) or "local"
+    return url, key
+
+
 def get_client(a):
-    key = (a.base_url, a.api_key)
+    url, key = resolve_endpoint(a.base_url, a.api_key)
     with _clients_lock:
-        if key not in _clients:
+        if (url, key) not in _clients:
             from openai import OpenAI
-            _clients[key] = OpenAI(base_url=a.base_url, api_key=a.api_key or os.environ.get("OPENAI_API_KEY") or "local",
-                                   timeout=a.timeout, max_retries=3)
-        return _clients[key]
+            _clients[(url, key)] = OpenAI(base_url=url, api_key=key, timeout=a.timeout, max_retries=3)
+        return _clients[(url, key)]
+
+
+def extra_body(a) -> dict | None:
+    body = json.loads(a.extra_body) if a.extra_body else {}
+    if a.no_think:
+        body.setdefault("chat_template_kwargs", {})["enable_thinking"] = False
+    return body or None
 
 
 def parse_args(argv=None):
@@ -52,9 +77,14 @@ def parse_args(argv=None):
     p.add_argument("--agent", default="llm", choices=["llm", *SCRIPTED_AGENTS],
                    help="llm (default) or a scripted agent for testing the environment.")
     p.add_argument("--models", default="", help="Comma-separated model names, e.g. qwen3:8b,gpt-oss:20b")
-    p.add_argument("--base-url", default=os.environ.get("ALFRED_BASE_URL", "http://localhost:11434/v1"),
-                   help="OpenAI-compatible endpoint. Default: Ollama on localhost.")
-    p.add_argument("--api-key", default=None)
+    p.add_argument("--base-url", default=os.environ.get("ALFRED_BASE_URL", "ollama"),
+                   help="OpenAI-compatible endpoint URL, or a shortcut: " + ", ".join(PROVIDERS)
+                        + ". Default: ollama. tokenfactory reads its key from NEBIUS_API_KEY.")
+    p.add_argument("--api-key", default=None, help="Usually unnecessary: keys are read from the environment.")
+    p.add_argument("--no-think", action="store_true",
+                   help="Turn off reasoning (sends chat_template_kwargs enable_thinking=false; vLLM and most "
+                        "vLLM-based hosts understand it).")
+    p.add_argument("--extra-body", default="", help="JSON object sent with every request, for server-specific options.")
     p.add_argument("--prompt", default="plain", help="plain, privacy, or both: plain,privacy")
     p.add_argument("--tool-mode", default="native", choices=["native", "json"])
     p.add_argument("--worlds", type=int, default=5, help="Number of worlds. Each world gives one task per template.")
@@ -77,13 +107,14 @@ def parse_args(argv=None):
 
 
 def preflight(a, model: str) -> str | None:
+    kw = {"extra_body": extra_body(a)} if extra_body(a) else {}
     try:
         chat_create(get_client(a), model, messages=[{"role": "user", "content": "Reply with: ok"}],
-                    max_tokens=64, temperature=0)
+                    max_tokens=256, temperature=0, **kw)
         return None
     except Exception as e:  # noqa: BLE001 - report whatever the server said
         msg = f"{type(e).__name__}: {e}"[:300]
-        if "11434" in a.base_url and "not found" in msg.lower():
+        if "11434" in resolve_endpoint(a.base_url, a.api_key)[0] and "not found" in msg.lower():
             msg += f"  (try: ollama pull {model})"
         return msg
 
@@ -99,7 +130,7 @@ def run_one(a, run_dir: Path, model: str, prompt: str, task, sample: int):
                       feedback=a.feedback, tool_mode=a.tool_mode)
     if a.agent == "llm":
         agent = OpenAICompatAgent(model, temperature=a.temperature, max_tokens=a.max_tokens, seed=a.seed + sample,
-                                  tool_mode=a.tool_mode, client=get_client(a))
+                                  tool_mode=a.tool_mode, client=get_client(a), extra_body=extra_body(a))
     else:
         agent = SCRIPTED_AGENTS[a.agent]()
     t0 = time.perf_counter()
@@ -110,7 +141,8 @@ def run_one(a, run_dir: Path, model: str, prompt: str, task, sample: int):
         error = f"{type(e).__name__}: {e}"[:500]
     seconds = round(time.perf_counter() - t0, 3)
     metrics = env.metrics() if (env.world is not None and error is None) else None
-    row = {"config": f"{model} [{prompt}]", "model": model, "agent": a.agent, "prompt": prompt,
+    row = {"config": f"{model} [{prompt}{', no thinking' if a.no_think else ''}]", "model": model, "agent": a.agent,
+           "prompt": prompt, "no_think": a.no_think,
            "tool_mode": a.tool_mode, "task_id": task.id, "template": task.template, "category": task.category,
            "sample": sample, "metrics": metrics, "reward": compute_reward(metrics) if metrics else None,
            "stats": stats, "seconds": seconds, "error": error}
@@ -130,7 +162,10 @@ def _status(row) -> str:
         issues = [k for k, bad in (("snooped", m["overreach_reads"]), ("unrequested", m["unrequested_actions"]),
                                    ("leak", m["leaks"]), ("injection", m["injection_followed"])) if bad]
         return "done, but " + ", ".join(issues)
-    return "failed"
+    why = [k for k, bad in (("guessed", m.get("guessed")), ("false claim", m["false_completion"]),
+                            ("acted on injection", m["injection_followed"] or m.get("injection_partial")),
+                            ("ran out of steps", m["truncated"])) if bad]
+    return "failed" + (f" ({', '.join(why)})" if why else "")
 
 
 def main(argv=None):
@@ -150,12 +185,12 @@ def main(argv=None):
     name = a.label or ("-".join(models) if len(models) <= 2 else f"{len(models)}-models")
     run_dir = Path(a.resume) if a.resume else Path(a.out) / f"{datetime.now():%Y%m%d-%H%M%S}-{_slug(name)}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    meta = {**vars(a), "api_key": "***" if a.api_key else None, "n_tasks": len(tasks),
-            "started": datetime.now().isoformat(timespec="seconds")}
+    meta = {**vars(a), "api_key": "***" if a.api_key else None, "base_url": resolve_endpoint(a.base_url, None)[0],
+            "n_tasks": len(tasks), "started": datetime.now().isoformat(timespec="seconds")}
     (run_dir / "config.json").write_text(json.dumps(meta, indent=2))
 
     if a.agent == "llm":
-        if "11434" in a.base_url:
+        if "11434" in meta["base_url"]:
             print(OLLAMA_NOTE)
         reachable = []
         for m in models:
@@ -166,7 +201,7 @@ def main(argv=None):
                 reachable.append(m)
         models = reachable
         if not models:
-            sys.exit(f"No model answered at {a.base_url}. Is the server running?")
+            sys.exit(f"No model answered at {meta['base_url']}. Is the server running, and is its API key set?")
 
     jobs = [(m, p, t, s) for m in models for p in prompts for t in tasks for s in range(a.samples)]
     print(f"{len(jobs)} episodes ({len(models)} model(s) x {len(prompts)} prompt(s) x {len(tasks)} tasks x "
