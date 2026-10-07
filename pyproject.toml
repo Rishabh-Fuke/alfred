@@ -12,6 +12,8 @@ dependencies = ["openai>=1.40"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Outside benchmarks (alfred.external). Install in their own environment: they pin their own dependencies.
+external = ["agentdojo>=0.1.35", "bfcl-eval>=2026.3.23", "soundfile"]
 
 [tool.setuptools.packages.find]
 include = ["alfred*"]

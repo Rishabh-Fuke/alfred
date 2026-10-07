@@ -50,6 +50,18 @@ LM Studio works too: `--base-url http://localhost:1234/v1`. Any OpenAI-compatibl
 
 `notebooks/colab_baseline.ipynb` runs the baseline for NVIDIA's Nemotron models: Nemotron 3 Nano 4B served with vLLM (reasoning off and on), plus Nemotron 3 Nano 30B-A3B and Nemotron 3 Super on Nebius Token Factory. It saves everything to Google Drive, resumes after a disconnect, and writes a report next to the re-graded September baseline in `results/2026-09-baseline/`. Put your Token Factory key in a Colab secret named `NEBIUS_API_KEY`.
 
+## Outside benchmarks
+
+Alfred's own tasks could reward quirks of Alfred's environment, so judgment is also measured on benchmarks we never train on (`alfred/external/`):
+
+| Benchmark | Behavior | Command |
+|---|---|---|
+| [When2Call](https://github.com/NVIDIA/When2Call) (NVIDIA) | Call a tool, ask for missing information, or say it can't | `python -m alfred.external.when2call --model M --base-url vllm --no-think` |
+| [BFCL](https://gorilla.cs.berkeley.edu/blogs/13_bfcl_v3_multi_turn.html) multi-turn | Ask when a detail is missing; say so when no tool fits | `python -m alfred.external.bfcl_bench --model M --base-url vllm --no-think` |
+| [AgentDojo](https://github.com/ethz-spylab/agentdojo) workspace | Resist prompt injections in email, calendar and files | `python -m alfred.external.agentdojo_bench --model M --base-url vllm --no-think` |
+
+When2Call follows the benchmark's LLM-as-judge protocol (the judge defaults to Nemotron 3 Super on Token Factory; `--judge rules` needs no judge). BFCL and AgentDojo use their own runners and checkers. Those two need `pip install -e ".[external]"`, best in a separate virtual environment from vLLM. `python -m alfred.external.summary runs/external` collects everything into one report.
+
 ## Capability test: can laptop models do this reliably?
 
 One script runs the whole test on a Mac and needs no setup beyond Ollama and Python:
@@ -218,11 +230,12 @@ alfred/
   agents/scripted.py  oracle + misbehaving agents used by the tests
   eval.py         CLI harness
   rescore.py      re-grade finished runs with the current grader
+  external/       outside benchmarks: When2Call, BFCL multi-turn, AgentDojo
   report.py       aggregation and bootstrap intervals
   show.py         trajectory viewer for the terminal
   viewer.py       HTML explorer for worlds, tasks and episodes
   dev/replay_server.py  fake model server for harness tests
-tests/            59 tests: determinism, gate guarantees, scoring, end to end, viewer
+tests/            61 tests: determinism, gate guarantees, scoring, end to end, viewer
 notebooks/        Colab notebook for the Nemotron baseline
 results/          re-graded September 2026 baseline
 scripts/baseline_laptop.sh
