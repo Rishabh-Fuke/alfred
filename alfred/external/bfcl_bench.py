@@ -17,6 +17,7 @@ function-calling model (with optional extra_body) and summarizes the scores. Nee
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -89,11 +90,15 @@ def run(a) -> Path:
     from bfcl_eval.__main__ import cli
 
     categories = ",".join(a.categories.split(","))
-    if not a.skip_generate:
-        cli(["generate", "--model", name, "--test-category", categories, "--num-threads", str(a.workers),
-             "--temperature", str(a.temperature), "--result-dir", "result"], standalone_mode=False)
-    cli(["evaluate", "--model", name, "--test-category", categories, "--result-dir", "result",
-         "--score-dir", "score"], standalone_mode=False)
+    # BFCL prints a line for every step of every task; keep that in a log file instead of the notebook.
+    log = out / "bfcl.log"
+    print(f"BFCL {categories}: running {name}; BFCL's own output goes to {log}")
+    with log.open("a") as f, contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
+        if not a.skip_generate:
+            cli(["generate", "--model", name, "--test-category", categories, "--num-threads", str(a.workers),
+                 "--temperature", str(a.temperature), "--result-dir", "result"], standalone_mode=False)
+        cli(["evaluate", "--model", name, "--test-category", categories, "--result-dir", "result",
+             "--score-dir", "score"], standalone_mode=False)
     scores = read_scores(out / "score", name)
     (out / "summary.json").write_text(json.dumps(scores, indent=2))
     text = render(label, scores)
