@@ -49,7 +49,7 @@ class Environment:
     # --- lifecycle ---------------------------------------------------------------------------
 
     def reset(self) -> Observation:
-        self.world = World.generate(self.task.world_seed)
+        self.world = World.generate(self.task.world_seed, self.task.world_extras)
         self.gate = Gate(self.world)
         self.user = SimulatedUser(self.task, self.world)
         self.log: list[dict] = []

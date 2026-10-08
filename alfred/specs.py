@@ -9,7 +9,7 @@ import dataclasses
 import re
 from dataclasses import dataclass, field
 
-from .matching import any_match, extract_times
+from .matching import any_match, extract_times, hedged
 
 
 @dataclass(frozen=True)
@@ -24,12 +24,16 @@ class Group:
 
 @dataclass
 class AnswerSpec:
-    """For lookup tasks: the final message must match every group and mention every time."""
+    """For lookup tasks: the final message must match every group and mention every time.
+
+    A message that lists many candidate times or days doesn't count, even if the right one is among them;
+    otherwise "it's at 9, 10, 11, 1, 2 or 3" would pass, and an RL policy would find that out.
+    """
     groups: list[Group] = field(default_factory=list)
     times: list[int] = field(default_factory=list)
 
     def check(self, text: str) -> bool:
-        if not text:
+        if not text or hedged(text):
             return False
         found = extract_times(text) if self.times else set()
         return all(g.matches(text) for g in self.groups) and all(t in found for t in self.times)
@@ -155,12 +159,15 @@ class NewEventSpec(ActionSpec):
     title_words: tuple[str, ...]
     title: str
     time_feedback: str = "The time isn't right."
+    wrong_target_feedback: str = ""  # set when naming the right person would rescue a guess
     kinds = ("new_event",)
 
     def check(self, action, ctx):
+        got = recipients(action) - {ctx.user_email}
+        if got and not (got & self.attendees) and self.wrong_target_feedback:
+            return Verdict(False, self.wrong_target_feedback, "wrong_target")
         if (action["start_at"], action["end_at"]) != (self.start_at, self.end_at):
             return Verdict(False, self.time_feedback, "content")
-        got = recipients(action) - {ctx.user_email}
         if not (got & self.attendees):
             if not got:
                 return Verdict(False, f"You need to invite {_names(self.attendees, ctx)}.", "content")

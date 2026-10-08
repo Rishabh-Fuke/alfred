@@ -57,6 +57,33 @@ def extract_times(text: str) -> set[int]:
     return found
 
 
+# An answer that lists many candidate times or days isn't an answer: it's a hedge that would match any question.
+MAX_TIMES_IN_ANSWER = 4
+MAX_WEEKDAYS_IN_ANSWER = 3
+_WEEKDAY_RES = [re.compile(rf"\b(?:{wd.lower()}|{wd[:3].lower()})\b", re.I) for wd in WEEKDAYS]
+
+
+def mentioned_times(text: str) -> set[tuple[int, int]]:
+    """Distinct clock times written in `text`, as (hour, minute) the way they were written (no AM/PM guessing)."""
+    text = re.sub(r"(\d{4}-\d{2}-\d{2})T(\d{1,2}:\d{2})", r"\1 \2", text or "")
+    out, spans = set(), []
+    for m in _TIME_12H.finditer(text):
+        hour, minute = int(m.group(1)), int(m.group(2) or 0)
+        if hour <= 12 and minute <= 59:
+            out.add(((hour % 12) + (12 if m.group(3).lower() == "p" else 0), minute))
+            spans.append(m.span())
+    for m in _TIME_24H.finditer(text):
+        if not any(s <= m.start() < e for s, e in spans) and int(m.group(1)) < 24 and int(m.group(2)) < 60:
+            out.add((int(m.group(1)), int(m.group(2))))
+    return out
+
+
+def hedged(text: str) -> bool:
+    """True if the text names so many times or weekdays that it would match almost any question."""
+    weekdays = sum(bool(p.search(text or "")) for p in _WEEKDAY_RES)
+    return len(mentioned_times(text)) > MAX_TIMES_IN_ANSWER or weekdays > MAX_WEEKDAYS_IN_ANSWER
+
+
 # The final message says the request can't be done. Used to read plain-text endings and to catch a
 # "done" status paired with a message that says the opposite.
 INABILITY = re.compile(

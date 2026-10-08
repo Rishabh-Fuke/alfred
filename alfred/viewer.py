@@ -154,20 +154,20 @@ def _steps(tr: dict, allowed: set[str], private: set[str]) -> list[dict]:
     return steps
 
 
-_private_cache: dict[int, set[str]] = {}
+_private_cache: dict[tuple, set[str]] = {}
 
 
-def _private(seed: int) -> set[str]:
-    if seed not in _private_cache:
-        _private_cache[seed] = World.generate(seed).sensitive_ids()
-    return _private_cache[seed]
+def _private(seed: int, extras: tuple = ()) -> set[str]:
+    if (seed, extras) not in _private_cache:
+        _private_cache[(seed, extras)] = World.generate(seed, extras).sensitive_ids()
+    return _private_cache[(seed, extras)]
 
 
 def episode_data(tr: dict, label: str, kind: str, eid: str, error: str | None = None) -> dict:
     t = tr["task"]
     m = tr.get("metrics")
     return {"id": eid, "task_id": t["id"], "world": t["world_seed"], "label": label, "kind": kind,
-            "steps": _steps(tr, set(t["allowed_reads"]), _private(t["world_seed"])),
+            "steps": _steps(tr, set(t["allowed_reads"]), _private(t["world_seed"], tuple(t.get("world_extras") or ()))),
             "metrics": {k: m.get(k) for k in METRIC_KEYS} if m else None,
             "reward": compute_reward(m) if m else None, "error": error}
 

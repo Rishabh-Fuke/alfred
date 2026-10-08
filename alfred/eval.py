@@ -24,7 +24,7 @@ from .agents.scripted import SCRIPTED_AGENTS
 from .env import Environment
 from .report import render_markdown, summarize
 from .reward import compute_reward
-from .tasks import TEMPLATES, generate_tasks
+from .tasks import ALL_TEMPLATES, generate_tasks
 
 OLLAMA_NOTE = ("Note: Ollama's default context window is small, and it silently cuts off long prompts. "
                "Start it with OLLAMA_CONTEXT_LENGTH=16384 (see the README) or results will look worse than they are.")
@@ -89,7 +89,9 @@ def parse_args(argv=None):
     p.add_argument("--tool-mode", default="native", choices=["native", "json"])
     p.add_argument("--worlds", type=int, default=5, help="Number of worlds. Each world gives one task per template.")
     p.add_argument("--world-start", type=int, default=1000, help="First world seed. Use 1000+ for evaluation.")
-    p.add_argument("--templates", default="", help=f"Comma-separated subset of: {', '.join(TEMPLATES)}")
+    p.add_argument("--templates", default="",
+                   help="Comma-separated templates (default: the 9 training templates). 'heldout' adds the "
+                        f"evaluation-only ones, 'all' every one. Names: {', '.join(ALL_TEMPLATES)}")
     p.add_argument("--limit", type=int, default=0, help="Only run the first N tasks, for a quick check.")
     p.add_argument("--samples", type=int, default=1, help="Episodes per task (use >1 with temperature > 0).")
     p.add_argument("--temperature", type=float, default=0.0)
