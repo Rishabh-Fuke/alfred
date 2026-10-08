@@ -19,9 +19,11 @@ Teaches NVIDIA's Nemotron 3 Nano 4B to ask when a request is ambiguous, say "I c
 | 9 | Reinforcement learning (GRPO) against the environment | ~3-6 h | |
 | 10 | Final evaluation, including outside benchmarks | ~2 h | |
 | 11 | Package results to send back | 1 min | |
+| 12 | Export for laptops: merge the adapter, convert to a 4-bit GGUF, check it still works, publish it (optional) | ~40 min | |
 
 **Secrets** (key icon in the left sidebar; turn on notebook access for each):
 - `NEBIUS_API_KEY`: your Token Factory key.
+- `HF_TOKEN` (only for cell 12's upload): a Hugging Face token with write access.
 - `GITHUB_TOKEN`: a fine-grained GitHub token with read access to the alfred repo, so this notebook always runs the latest code. Without it, upload the repo to Drive as `alfred.zip` (or a folder named `alfred`).
 
 Never paste keys into cells."""
@@ -179,7 +181,7 @@ TEACHER = 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'
 TEACHER_WORLDS = 220
 if not finished('teacher-nano30b', TEACHER_WORLDS * 9):
     background('teacher-nano30b', 'eval', '--models', TEACHER, '--base-url', 'tokenfactory', '--world-start', 0,
-               '--worlds', TEACHER_WORLDS, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 16,
+               '--worlds', TEACHER_WORLDS, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 12,
                *resume('teacher-nano30b'))
 # The bigger Nemotron models on the held-out task types, for reference (well under $1).
 for m in ['nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B', 'nvidia/nemotron-3-super-120b-a12b']:
@@ -314,10 +316,68 @@ patterns = ['train/*.md', 'train/data/*.md', 'train/sft/log.jsonl', 'train/sft/a
             'external/report.md', 'external/*/summary.*']
 files = [f for p in patterns for f in glob.glob(p)]
 new_runs = [d for d in glob.glob('runs/*') if any(k in d for k in ('-base-', '-sft-', '-rl-', '-tf-heldout-'))]
+files += glob.glob('train/report-*.md')
 subprocess.run(['rm', '-f', 'train-results.zip'])
 subprocess.run(['zip', '-qr', 'train-results.zip', *files, *new_runs], check=True)
 print(f'Download alfred-results/train-results.zip from your Drive ({os.path.getsize("train-results.zip") / 1e6:.0f} MB) '
       'and send it over.')
+"""
+
+
+EXPORT = r"""# 12. Export for laptops (about 40 minutes): merge, convert to GGUF, quantize to 4 bits, check, publish
+# The merged model goes to Drive; the 4-bit GGUF is what Ollama and llama.cpp run on a laptop. The check plays the
+# 45 Alfred tasks once with the 4-bit model under llama.cpp, so "it still works after quantization" is measured.
+FINAL = f'{TRAIN}/alfred-nemotron-3-nano-4b'
+stop_serving()
+if not os.path.exists(f'{FINAL}/alfred_merge.json'):
+    alfred('train.export', '--model', MODEL, '--adapter', f'{GRPO_DIR}/best', '--out', FINAL)
+LLAMA = '/content/llama.cpp'
+if not os.path.exists(f'{LLAMA}/build/bin/llama-server'):
+    sh(f'git clone -q --depth 1 https://github.com/ggml-org/llama.cpp {LLAMA}')
+    sh(f'cmake -S {LLAMA} -B {LLAMA}/build -DGGML_CUDA=ON -DLLAMA_CURL=OFF > /content/llama-build.log 2>&1')
+    sh(f'cmake --build {LLAMA}/build -j 12 --target llama-server llama-quantize >> /content/llama-build.log 2>&1')
+sh(f'{sys.executable} -m pip install -q --no-deps {LLAMA}/gguf-py')
+GGUF = f'{TRAIN}/gguf'
+os.makedirs(GGUF, exist_ok=True)
+BF16, Q4 = f'{GGUF}/alfred-nemotron-3-nano-4b-BF16.gguf', f'{GGUF}/alfred-nemotron-3-nano-4b-Q4_K_M.gguf'
+if not os.path.exists(BF16):
+    sh(f'{sys.executable} {LLAMA}/convert_hf_to_gguf.py {shlex.quote(FINAL)} --outtype bf16 --outfile {shlex.quote(BF16)}')
+if not os.path.exists(Q4):
+    sh(f'{LLAMA}/build/bin/llama-quantize {shlex.quote(BF16)} {shlex.quote(Q4)} Q4_K_M')
+print(f'4-bit model: {os.path.getsize(Q4) / 1e9:.2f} GB')
+
+# Play the Alfred tasks with the 4-bit model under llama.cpp, the way a laptop would run it.
+llama = subprocess.Popen([f'{LLAMA}/build/bin/llama-server', '-m', Q4, '--jinja', '-c', '131072', '-ngl', '99',
+                          '--port', '8090', '--parallel', '8', '--alias', 'alfred-q4'],
+                         stdout=open('/content/llama-server.log', 'w'), stderr=subprocess.STDOUT)
+for _ in range(120):
+    try:
+        urllib.request.urlopen('http://localhost:8090/v1/models', timeout=3)
+        break
+    except Exception:
+        time.sleep(2)
+try:
+    Q4_RUN = ['--base-url', 'http://localhost:8090/v1', '--tool-mode', 'native', '--no-think', '--temperature', 0.6,
+              '--extra-body', '{"top_p": 0.95}', '--workers', 8]
+    if not finished('rl-q4-native', 9 * EPISODES):
+        alfred('eval', '--models', 'alfred-q4', *Q4_RUN, '--worlds', 5, '--samples', 3, *resume('rl-q4-native'))
+finally:
+    llama.terminate()
+alfred('report', *runs('rl-native', 'rl-q4-native'), '--out', f'{TRAIN}/report-q4.md')
+
+# Publish to Hugging Face (optional): the merged model and the GGUF, so anyone can run it.
+hf_token = secret('HF_TOKEN')
+if hf_token:
+    from huggingface_hub import HfApi
+    api = HfApi(token=hf_token)
+    user = api.whoami()['name']
+    for repo, folder, pattern in [(f'{user}/alfred-nemotron-3-nano-4b', FINAL, None),
+                                  (f'{user}/alfred-nemotron-3-nano-4b-GGUF', GGUF, '*Q4_K_M.gguf')]:
+        api.create_repo(repo, exist_ok=True)
+        api.upload_folder(repo_id=repo, folder_path=folder, allow_patterns=pattern)
+        print('Uploaded', f'https://huggingface.co/{repo}')
+else:
+    print('Add an HF_TOKEN secret to publish the model; the files are on your Drive in', TRAIN)
 """
 
 
@@ -332,7 +392,8 @@ def cell(source: str, kind: str = "code") -> dict:
 
 def main():
     nb = {"cells": [cell(INTRO, "markdown"), cell(SETUP), cell(KEYS), cell(TEACHER), cell(SMOKE), cell(BASELINE),
-                    cell(DATA), cell(SFT), cell(EVAL_SFT), cell(GRPO), cell(EVAL_FINAL), cell(PACKAGE)],
+                    cell(DATA), cell(SFT), cell(EVAL_SFT), cell(GRPO), cell(EVAL_FINAL), cell(PACKAGE),
+                    cell(EXPORT)],
           "metadata": {"accelerator": "GPU", "colab": {"gpuType": "A100", "provenance": []},
                        "kernelspec": {"display_name": "Python 3", "name": "python3"},
                        "language_info": {"name": "python"}},
