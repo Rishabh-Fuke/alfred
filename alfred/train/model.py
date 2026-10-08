@@ -12,10 +12,11 @@ from pathlib import Path
 
 import torch
 
-# Linear layers LoRA can adapt. Attention and MLP projections, plus the Mamba output projection in hybrid models
-# like Nemotron-H. The Mamba input projection is left out on purpose: vLLM serves it as one packed layer, so an
-# adapter on it may not load there, and every adapter has to load into vLLM for RL and serving.
-LORA_TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "out_proj")
+# Linear layers LoRA adapts by default: attention and MLP projections, which in Nemotron-H are about half the
+# layers. Every adapter has to load into vLLM (for RL and serving), so the Mamba projections are left out: vLLM
+# serves the input projection as one packed layer, and the output projection (`out_proj`, which vLLM should
+# accept) can be added with --lora-targets once an adapter with it has been seen to load.
+LORA_TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
 
 
 def device() -> torch.device:

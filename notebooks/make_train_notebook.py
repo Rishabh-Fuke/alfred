@@ -10,14 +10,15 @@ Teaches NVIDIA's Nemotron 3 Nano 4B to ask when a request is ambiguous, say "I c
 
 | Cell | What | Time | Cost |
 |---|---|---|---|
-| 3 | Teacher episodes on training worlds (Nemotron 3 Nano 30B on Token Factory) | ~1 h | ~$5 of credits |
-| 4 | Build the training set (teacher's clean successes + scripted episodes) | 1 min | |
-| 5 | Baselines: the untrained 4B model in native tool-calling mode, plus the new held-out task types | ~30 min | |
-| 6 | Supervised fine-tuning (LoRA) | ~1-3 h | |
-| 7 | Evaluate the fine-tuned model | ~30 min | |
-| 8 | Reinforcement learning (GRPO) against the environment | ~3-6 h | |
-| 9 | Final evaluation, including outside benchmarks | ~2 h | |
-| 10 | Package results to send back | 1 min | |
+| 3 | Start the teacher episodes in the background (Nemotron 3 Nano 30B on Token Factory; no GPU needed) | ~1 h, in the background | ~$5 of credits |
+| 4 | Meanwhile, a smoke test on the GPU: 2 training steps, load that adapter into vLLM, one RL step. Catches setup problems in minutes, not hours | ~15 min | |
+| 5 | Baselines for the untrained 4B model in native tool-calling mode, and on the new held-out task types | ~40 min | <$1 |
+| 6 | Wait for the teacher, then build the training set | | |
+| 7 | Supervised fine-tuning (LoRA) | ~1-3 h | |
+| 8 | Evaluate the fine-tuned model | ~30 min | |
+| 9 | Reinforcement learning (GRPO) against the environment | ~3-6 h | |
+| 10 | Final evaluation, including outside benchmarks | ~2 h | |
+| 11 | Package results to send back | 1 min | |
 
 **Secrets** (key icon in the left sidebar; turn on notebook access for each):
 - `NEBIUS_API_KEY`: your Token Factory key.
@@ -109,9 +110,37 @@ def resume(label):
     return ['--resume', done[-1]] if done else ['--out', f'{OUT}/runs', '--label', label]
 
 
-def finished(label, episodes):
+def progress(label):
     done = sorted(glob.glob(f'{OUT}/runs/*-{label}/results.jsonl'))
-    return bool(done) and sum(1 for _ in open(done[-1])) >= episodes
+    return sum(1 for _ in open(done[-1])) if done else 0
+
+
+def finished(label, episodes):
+    return progress(label) >= episodes
+
+
+def background(label, *args):
+    # Starts `python -m alfred.<args>` in the background (for runs that only call Token Factory) and returns.
+    if subprocess.run(['pgrep', '-f', label], capture_output=True).returncode == 0:
+        print(f'{label} is already running')
+        return
+    subprocess.Popen([sys.executable, '-m', f'alfred.{args[0]}', *map(str, args[1:])], cwd='/content/alfred',
+                     stdout=open(f'/content/{label}.log', 'w'), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                     start_new_session=True)
+    print(f'{label} started in the background; its log is /content/{label}.log')
+
+
+def wait_for(label, episodes):
+    while not finished(label, episodes):
+        if subprocess.run(['pgrep', '-f', label], capture_output=True).returncode != 0:
+            time.sleep(5)
+            if finished(label, episodes):
+                break
+            print(open(f'/content/{label}.log').read()[-3000:] if os.path.exists(f'/content/{label}.log') else '')
+            raise RuntimeError(f'{label} stopped at {progress(label)}/{episodes} episodes. Run its cell again to resume.')
+        print(f'{label}: {progress(label)}/{episodes} episodes', flush=True)
+        time.sleep(60)
+    print(f'{label}: done')
 
 
 def serve(*adapters, gpu=0.9):
@@ -142,32 +171,35 @@ tf = OpenAI(base_url='https://api.tokenfactory.nebius.com/v1/', api_key=os.envir
 print('Token Factory OK:', sorted(m.id for m in tf.models.list() if 'nemotron' in m.id.lower()))
 """
 
-TEACHER = r"""# 3. Teacher episodes on training worlds (about 1 hour, roughly $5 of Token Factory credits)
+TEACHER = r"""# 3. Start the teacher episodes in the background (about 1 hour, roughly $5 of Token Factory credits)
 # Nemotron 3 Nano 30B scored 95% clean on the baseline, as well as Super, at a fifth of the price. Worlds 0-219,
-# all 9 training task types, one episode each. Only clean successes become training data (cell 4).
+# all 9 training task types, one episode each. Only clean successes become training data (cell 6). This runs on
+# Token Factory, so the GPU is free for the next cells meanwhile.
 TEACHER = 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'
 TEACHER_WORLDS = 220
 if not finished('teacher-nano30b', TEACHER_WORLDS * 9):
-    alfred('eval', '--models', TEACHER, '--base-url', 'tokenfactory', '--world-start', 0, '--worlds', TEACHER_WORLDS,
-           '--temperature', 0.6, '--max-tokens', 8192, '--workers', 16, *resume('teacher-nano30b'))
-
-# Optional: Nemotron 3 Super on the judgment-heavy task types, for more varied examples (about $3).
-USE_SUPER = False
-if USE_SUPER and not finished('teacher-super', 100 * 3):
-    alfred('eval', '--models', 'nvidia/nemotron-3-super-120b-a12b', '--base-url', 'tokenfactory',
-           '--world-start', 220, '--worlds', 100, '--templates', 'ambiguous_recipient,impossible_request,injection_lookup',
-           '--temperature', 0.6, '--max-tokens', 8192, '--workers', 16, *resume('teacher-super'))
+    background('teacher-nano30b', 'eval', '--models', TEACHER, '--base-url', 'tokenfactory', '--world-start', 0,
+               '--worlds', TEACHER_WORLDS, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 16,
+               *resume('teacher-nano30b'))
+# The bigger Nemotron models on the held-out task types, for reference (well under $1).
+for m in ['nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B', 'nvidia/nemotron-3-super-120b-a12b']:
+    label = 'tf-heldout-' + m.split('/')[-1].lower()
+    if not finished(label, 7 * EPISODES):
+        background(label, 'eval', '--models', m, '--base-url', 'tokenfactory', '--templates', 'heldout',
+                   '--worlds', 5, '--samples', 3, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 4,
+                   *resume(label))
 """
 
-DATA = r"""# 4. Build the training set (about 1 minute)
+DATA = r"""# 6. Wait for the teacher, then build the training set (about 1 minute once it's done)
 # The teacher's clean successes, at most one per task, topped up with scripted episodes (worlds 300-549) so every
 # task type has the same count. Validation tasks are held out by task, not by episode.
+wait_for('teacher-nano30b', TEACHER_WORLDS * 9)
 teacher_runs = sorted(d for d in glob.glob(f'{OUT}/runs/*-teacher-*') if os.path.exists(f'{d}/results.jsonl'))
 print('Teacher runs:', *teacher_runs, sep='\n  ')
 alfred('train.data', '--runs', *teacher_runs, '--oracle-worlds', '300-549', '--out', DATA_FILE)
 """
 
-BASELINE = r"""# 5. Baselines for the comparison (about 30 minutes)
+BASELINE = r"""# 5. Baselines for the comparison (about 40 minutes)
 # The October baseline ran the 4B model with JSON tool calls, its better mode before training. Training uses
 # native tool calls (what vLLM, agent frameworks and the outside benchmarks use), so measure the untrained model
 # that way too, and on the held-out task types the model never trains on (both tool modes, to be fair to it).
@@ -180,15 +212,29 @@ if not finished('base-native-heldout', 7 * EPISODES):
 if not finished('base-json-heldout', 7 * EPISODES):
     alfred('eval', '--models', SERVED, *JSON_MODE, '--templates', 'heldout', '--worlds', 5, '--samples', 3,
            *resume('base-json-heldout'))
-# The bigger Nemotron models on the held-out types, for reference (cheap).
-for m in ['nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B', 'nvidia/nemotron-3-super-120b-a12b']:
-    label = 'tf-heldout-' + m.split('/')[-1].lower()
-    if not finished(label, 7 * EPISODES):
-        alfred('eval', '--models', m, '--base-url', 'tokenfactory', '--templates', 'heldout', '--worlds', 5,
-               '--samples', 3, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 8, *resume(label))
+alfred('report', *runs('main-nemotron4b-nothink', 'base-native'), '--out', f'{TRAIN}/report-base.md')
 """
 
-SFT = r"""# 6. Supervised fine-tuning with LoRA (about 1-3 hours; resumes after a disconnect)
+SMOKE = r"""# 4. Smoke test of the training stack while the teacher runs (about 15 minutes)
+# Two SFT steps on 8 scripted conversations, load that adapter into vLLM and play one task with it, then one tiny
+# GRPO step. If anything in the setup is wrong (model loading, Mamba kernels, LoRA in vLLM, GPU memory while both
+# run), it shows up here instead of hours into training.
+SMOKE = '/content/smoke'
+if not os.path.exists(f'{SMOKE}/done'):
+    stop_serving()
+    alfred('train.data', '--oracle-worlds', '600-601', '--out', f'{SMOKE}/data.jsonl')
+    alfred('train.sft', '--model', MODEL, '--data', f'{SMOKE}/data.jsonl', '--out', f'{SMOKE}/sft', '--limit', 8,
+           '--batch', 4, '--epochs', 1, '--eval-every', 1000, '--save-every', 1000)
+    serve(f'alfred-smoke={SMOKE}/sft/adapter', gpu=0.42)
+    alfred('eval', '--models', 'alfred-smoke', *NATIVE, '--worlds', 1, '--templates', 'event_time_lookup',
+           '--out', f'{SMOKE}/eval')
+    alfred('train.grpo', '--model', MODEL, '--init-adapter', f'{SMOKE}/sft/adapter', '--out', f'{SMOKE}/grpo',
+           '--steps', 1, '--tasks', 2, '--group', 4, '--val-every', 1000, '--val-worlds', 1)
+    open(f'{SMOKE}/done', 'w').write('ok')
+print('Smoke test passed.')
+"""
+
+SFT = r"""# 7. Supervised fine-tuning with LoRA (about 1-3 hours; resumes after a disconnect)
 # One conversation per forward pass, 16 per optimizer step, loss only on the assistant's turns.
 stop_serving()  # training needs the GPU memory
 if not os.path.exists(f'{SFT_DIR}/adapter/adapter_model.safetensors'):
@@ -197,7 +243,7 @@ if not os.path.exists(f'{SFT_DIR}/adapter/adapter_model.safetensors'):
 print(open(f'{SFT_DIR}/log.jsonl').read().splitlines()[-1])
 """
 
-EVAL_SFT = r"""# 7. Evaluate the fine-tuned model on the same tasks (about 30 minutes)
+EVAL_SFT = r"""# 8. Evaluate the fine-tuned model on the same tasks (about 30 minutes)
 serve(f'alfred-sft={SFT_DIR}/adapter')
 if not finished('sft-native', 9 * EPISODES):
     alfred('eval', '--models', 'alfred-sft', *NATIVE, '--worlds', 5, '--samples', 3, *resume('sft-native'))
@@ -209,7 +255,7 @@ alfred('report', *runs('base-native-heldout', 'base-json-heldout', 'sft-native-h
        '--out', f'{TRAIN}/report-sft-heldout.md')
 """
 
-GRPO = r"""# 8. Reinforcement learning (GRPO) against the environment (about 3-6 hours; resumes after a disconnect)
+GRPO = r"""# 9. Reinforcement learning (GRPO) against the environment (about 3-6 hours; resumes after a disconnect)
 # vLLM plays the episodes with the current policy while the trainer shares the GPU, so vLLM gets less memory here.
 # Every step: 8 training tasks x 8 attempts, rewards from the environment's checks, one policy-gradient step,
 # and the new adapter goes straight into vLLM. Validation on worlds 950-955 every 10 steps; the best is kept.
@@ -223,7 +269,7 @@ for line in open(f'{GRPO_DIR}/log.jsonl').read().splitlines()[-3:]:
     print({k: r.get(k) for k in ('step', 'reward', 'clean_success', 'over_ask', 'false_decline', 'trained_episodes')})
 """
 
-EVAL_FINAL = r"""# 9. Final evaluation: Alfred tasks, held-out task types, and the outside benchmarks (about 2 hours)
+EVAL_FINAL = r"""# 10. Final evaluation: Alfred tasks, held-out task types, and the outside benchmarks (about 2 hours)
 serve(f'alfred-sft={SFT_DIR}/adapter', f'alfred-rl={GRPO_DIR}/best')
 if not finished('rl-native', 9 * EPISODES):
     alfred('eval', '--models', 'alfred-rl', *NATIVE, '--worlds', 5, '--samples', 3, *resume('rl-native'))
@@ -259,7 +305,7 @@ external('summary', EXT, '--out', f'{EXT}/report.md')
 print(open(f'{EXT}/report.md').read())
 """
 
-PACKAGE = r"""# 10. Package everything to send back (about 1 minute)
+PACKAGE = r"""# 11. Package everything to send back (about 1 minute)
 # Logs, reports, data stats, validation curves and episodes, and every eval run's trajectories. Adapters and
 # the training data itself stay on Drive.
 os.chdir(OUT)
@@ -285,8 +331,8 @@ def cell(source: str, kind: str = "code") -> dict:
 
 
 def main():
-    nb = {"cells": [cell(INTRO, "markdown"), cell(SETUP), cell(KEYS), cell(TEACHER), cell(DATA), cell(BASELINE),
-                    cell(SFT), cell(EVAL_SFT), cell(GRPO), cell(EVAL_FINAL), cell(PACKAGE)],
+    nb = {"cells": [cell(INTRO, "markdown"), cell(SETUP), cell(KEYS), cell(TEACHER), cell(SMOKE), cell(BASELINE),
+                    cell(DATA), cell(SFT), cell(EVAL_SFT), cell(GRPO), cell(EVAL_FINAL), cell(PACKAGE)],
           "metadata": {"accelerator": "GPU", "colab": {"gpuType": "A100", "provenance": []},
                        "kernelspec": {"display_name": "Python 3", "name": "python3"},
                        "language_info": {"name": "python"}},

@@ -21,8 +21,8 @@ from pathlib import Path
 
 import torch
 
-from .model import (Schedule, add_lora, load_checkpoint, load_model, load_tokenizer, save_checkpoint, token_logprobs,
-                    trainable_parameters)
+from .model import (LORA_TARGETS, Schedule, add_lora, load_checkpoint, load_model, load_tokenizer, save_checkpoint,
+                    token_logprobs, trainable_parameters)
 from .render import TemplateMismatch, check_prompt_tokens, render
 
 
@@ -72,6 +72,8 @@ def parse_args(argv=None):
     p.add_argument("--lora-r", type=int, default=32)
     p.add_argument("--lora-alpha", type=int, default=64)
     p.add_argument("--lora-dropout", type=float, default=0.0)
+    p.add_argument("--lora-targets", default=",".join(LORA_TARGETS),
+                   help="Linear layer names to adapt (those missing from the model are skipped).")
     p.add_argument("--max-len", type=int, default=12288, help="Tokens per conversation; longer ones are cut.")
     p.add_argument("--eval-every", type=int, default=25)
     p.add_argument("--save-every", type=int, default=25)
@@ -108,7 +110,8 @@ def main(argv=None):
 
     model = add_lora(load_model(a.model, use_kernels=not a.no_kernels, trust_remote_code=a.trust_remote_code,
                                 gradient_checkpointing=not a.no_gradient_checkpointing),
-                     r=a.lora_r, alpha=a.lora_alpha, dropout=a.lora_dropout)
+                     r=a.lora_r, alpha=a.lora_alpha, dropout=a.lora_dropout,
+                     targets=tuple(t.strip() for t in a.lora_targets.split(",") if t.strip()))
     params = trainable_parameters(model)
     print(f"LoRA: {sum(p.numel() for p in params):,} trainable parameters on "
           f"{', '.join(model.peft_config['default'].target_modules)}")
