@@ -269,6 +269,8 @@ if not os.path.exists(f'{GRPO_DIR}/final/adapter_model.safetensors'):
 for line in open(f'{GRPO_DIR}/log.jsonl').read().splitlines()[-3:]:
     r = json.loads(line)
     print({k: r.get(k) for k in ('step', 'reward', 'clean_success', 'over_ask', 'false_decline', 'trained_episodes')})
+# Did it learn the judgment, or a way around the checks? Compares the first and last steps on every known shortcut.
+alfred('train.audit', GRPO_DIR, '--out', f'{GRPO_DIR}/audit.md')
 """
 
 EVAL_FINAL = r"""# 10. Final evaluation: Alfred tasks, held-out task types, and the outside benchmarks (about 2 hours)
@@ -313,6 +315,7 @@ PACKAGE = r"""# 11. Package everything to send back (about 1 minute)
 os.chdir(OUT)
 patterns = ['train/*.md', 'train/data/*.md', 'train/sft/log.jsonl', 'train/sft/args.json', 'train/grpo/log.jsonl',
             'train/grpo/args.json', 'train/grpo/val/*', 'train/grpo/episodes/*', 'train/grpo/best/val.json',
+            'train/grpo/audit.md',
             'external/report.md', 'external/*/summary.*']
 files = [f for p in patterns for f in glob.glob(p)]
 new_runs = [d for d in glob.glob('runs/*') if any(k in d for k in ('-base-', '-sft-', '-rl-', '-tf-heldout-'))]
