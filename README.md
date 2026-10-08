@@ -62,6 +62,14 @@ Alfred's own tasks could reward quirks of Alfred's environment, so judgment is a
 
 When2Call follows the benchmark's LLM-as-judge protocol (the judge defaults to Nemotron 3 Super on Token Factory; `--judge rules` needs no judge). BFCL and AgentDojo use their own runners and checkers. Those two need `pip install -e ".[external]"`, best in a separate virtual environment from vLLM. `python -m alfred.external.summary runs/external` collects everything into one report.
 
+## The app
+
+```bash
+python -m alfred.app --model alfred-4b --base-url ollama     # or --base-url vllm, or any OpenAI-compatible server
+```
+
+A local page where a person works with Alfred on a simulated person's email, calendar and contacts. You see each step as it happens (what it searched, which records it opened, with private ones marked), and nothing changes until you say so: every draft waits for **Send**, **Edit** or **Don't send** (with an optional reason Alfred gets back), and every question waits for your answer. A ledger shows what the last request touched. Answers to Alfred's questions are remembered for later requests, and can be forgotten. With `NEBIUS_API_KEY` set, an email draft can be polished by Nemotron 3 Super on Token Factory; only that draft's subject and body leave the machine. Native tool calls that a local server leaves as text (some llama.cpp and Ollama setups) are parsed by Alfred itself.
+
 ## Training
 
 `alfred/train/` teaches a small model judgment in two stages, both on training worlds only (0-949). `notebooks/colab_train.ipynb` runs the whole thing on a Colab A100 for Nemotron 3 Nano 4B, resuming after disconnects.
@@ -284,6 +292,7 @@ alfred/
   dev/replay_server.py  fake model server for harness tests
   train/          data (teacher filtering), render (chat-template masking), sft, grpo, rollout, serve (vLLM),
                   export (merge an adapter into the base checkpoint)
+  app/            the local web app: a person approves drafts and answers questions (live.py, server.py, static/)
 tests/            92 tests, including SFT and GRPO end to end on a tiny CPU model against a fake vLLM server
 notebooks/        Colab notebooks: the Nemotron baseline, and training (make_train_notebook.py writes it)
 results/          the September and October baselines

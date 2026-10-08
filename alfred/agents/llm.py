@@ -32,6 +32,39 @@ def strip_think(text: str | None) -> str:
     return _HARMONY.sub("", text).strip()
 
 
+_XML_CALL = re.compile(r"<tool_call>\s*<function=([\w.-]+)>(.*?)</function>\s*(?:</tool_call>|$)", re.S)
+_XML_PARAM = re.compile(r"<parameter=([\w.-]+)>\n?(.*?)\n?</parameter>", re.S)
+
+
+def parse_xml_tool_calls(text: str) -> list[tuple[str, dict]]:
+    """Tool calls written in the Qwen3-Coder XML format that Nemotron 3 uses, for servers that pass them through as
+    text instead of parsing them (some llama.cpp and Ollama setups):
+
+        <tool_call>
+        <function=search_emails>
+        <parameter=query>
+        flight
+        </parameter>
+        </function>
+        </tool_call>
+
+    Values that look like JSON lists, objects, numbers or booleans are decoded; everything else stays a string.
+    """
+    calls = []
+    for name, body in _XML_CALL.findall(text or ""):
+        args = {}
+        for key, raw in _XML_PARAM.findall(body):
+            value = raw.strip()
+            if value[:1] in "[{" or value in ("true", "false", "null") or re.fullmatch(r"-?\d+(\.\d+)?", value):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+            args[key] = value
+        calls.append((name, args))
+    return calls
+
+
 def _infer_tool(obj: dict):
     keys = set(obj)
     for needed, tool in _KEYS_TO_TOOL:
@@ -164,6 +197,19 @@ class OpenAICompatAgent:
                 messages.append({"role": "assistant", "content": content, "tool_calls": [
                     {"id": cid, "type": "function",
                      "function": {"name": name, "arguments": args if isinstance(args, str) else json.dumps(args)}}
+                    for cid, name, args in calls]})
+                for cid, name, args in calls:
+                    messages.append({"role": "tool", "tool_call_id": cid, "content": env.call_tool(name, args)})
+                    if env.done:
+                        break
+            elif native and parse_xml_tool_calls(strip_think(content)):
+                # The server didn't parse the model's tool calls; read them the way the model wrote them.
+                calls = [(f"call_{turn}_{k}", name, args)
+                         for k, (name, args) in enumerate(parse_xml_tool_calls(strip_think(content)))]
+                stats["recovered_calls"] += 1
+                env.note_format("recovered_call")
+                messages.append({"role": "assistant", "content": "", "tool_calls": [
+                    {"id": cid, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
                     for cid, name, args in calls]})
                 for cid, name, args in calls:
                     messages.append({"role": "tool", "tool_call_id": cid, "content": env.call_tool(name, args)})

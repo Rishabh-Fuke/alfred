@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alfred</title>
+<style>
+@font-face { font-family: "Spectral"; src: url("/static/fonts/spectral-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Spectral"; src: url("/static/fonts/spectral-latin-400-italic.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Spectral"; src: url("/static/fonts/spectral-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "Atkinson Next"; src: url("/static/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2-variations"); font-weight: 200 800; font-style: normal; font-display: swap; }
+
+:root {
+  /* Every accent means one thing. Brass: something Alfred looked at. Plum: private.
+     Seal: waiting on you, or a warning. Sage: done. */
+  --paper: #F3F5F1;
+  --surface: #FFFFFF;
+  --ink: #1B2433;
+  --muted: #586172;
+  --faint: #8A929E;
+  --rule: #D8DCD3;
+  --brass: #8F6A1F;
+  --brass-soft: #F1E6CC;
+  --seal: #8E2B2B;
+  --seal-soft: #F6E3E0;
+  --sage: #2C664B;
+  --sage-soft: #DDEDE3;
+  --plum: #59478A;
+  --plum-soft: #E9E4F4;
+  --focus: #2F5DAA;
+  --serif: "Spectral", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --sans: "Atkinson Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --lift: 0 1px 0 rgba(27, 36, 51, .06), 0 12px 32px -12px rgba(27, 36, 51, .28);
+  --lock: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11'><rect x='1' y='4.6' width='8' height='6' rx='1.3'/><path d='M3 4.8V3.2a2 2 0 0 1 4 0v1.6' fill='none' stroke='black' stroke-width='1.5'/></svg>");
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #121822; --surface: #1A2230; --ink: #E7EAEF; --muted: #A3ABB8; --faint: #7C8594; --rule: #2B3545;
+    --brass: #D9AE55; --brass-soft: #3A3122; --seal: #EC8A7E; --seal-soft: #3D2526; --sage: #79C9A0;
+    --sage-soft: #1E3529; --plum: #B7A5EC; --plum-soft: #2D2840; --focus: #8DB4FF;
+    --lift: 0 1px 0 rgba(0, 0, 0, .3), 0 14px 36px -12px rgba(0, 0, 0, .7);
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- frame ---------- */
+.app { display: grid; grid-template-columns: 300px minmax(0, 1fr) 272px; grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh; }
+header { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 18px; padding: 14px 22px 12px;
+  border-bottom: 1px solid var(--rule); }
+.wordmark { font-family: var(--serif); font-weight: 600; font-size: 26px; letter-spacing: -.01em; margin: 0; }
+.whose { color: var(--muted); font-size: 14px; }
+.whose b { color: var(--ink); font-weight: 600; }
+header .spacer { flex: 1; }
+.runs-on { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.runs-on .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sage); display: inline-block; }
+.drawer-buttons { display: none; gap: 6px; }
+
+aside, main { min-height: 0; }
+.world { border-right: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; }
+.ledger { border-left: 1px solid var(--rule); overflow-y: auto; padding: 18px 20px 28px; }
+main { display: flex; flex-direction: column; min-height: 0; }
+
+/* ---------- the person's world ---------- */
+.tabs { display: flex; gap: 2px; padding: 12px 14px 8px; }
+.tab { border: 0; background: none; padding: 5px 10px; border-radius: 6px; color: var(--muted); cursor: pointer;
+  font-size: 14px; }
+.tab[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--rule); }
+.records { list-style: none; margin: 0; padding: 4px 8px 24px; overflow-y: auto; flex: 1; }
+.record { border-radius: 8px; }
+.record > button { width: 100%; text-align: left; border: 0; background: none; padding: 8px 10px 8px 22px;
+  border-radius: 8px; cursor: pointer; position: relative; display: block; }
+.record > button:hover { background: rgba(127, 127, 127, .07); }
+.record .title { display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.record .meta { display: block; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.record .mark { position: absolute; left: 8px; top: 14px; width: 7px; height: 7px; border-radius: 50%; }
+.record.seen .mark { background: var(--brass); }
+.record.private .title::after { content: ""; display: inline-block; width: 10px; height: 11px; margin-left: 6px;
+  vertical-align: -1px; background: var(--plum);
+  -webkit-mask: var(--lock) no-repeat center / contain; mask: var(--lock) no-repeat center / contain; }
+.record .detail { margin: 0 10px 10px 22px; padding: 10px 12px; background: var(--surface); border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--rule); font-size: 13.5px; white-space: pre-wrap; }
+.record .detail dl { margin: 0 0 8px; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+.record .detail dt { color: var(--muted); }
+.record .detail dd { margin: 0; overflow-wrap: anywhere; }
+.folder { font-size: 11.5px; color: var(--faint); margin-left: 6px; font-weight: 400; }
+.world-note { padding: 8px 18px 14px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--rule); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.legend span::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 6px; vertical-align: 1px; }
+.legend .l-seen::before { background: var(--brass); }
+.legend .l-private::before { background: var(--plum); border-radius: 2px; }
+
+/* ---------- the conversation ---------- */
+.thread { flex: 1; overflow-y: auto; padding: 28px clamp(18px, 4vw, 56px) 24px; }
+.thread-inner { max-width: 720px; }
+.empty h2 { font-family: var(--serif); font-weight: 400; font-size: 30px; line-height: 1.2; margin: 18px 0 6px; }
+.empty p { color: var(--muted); margin: 0 0 22px; max-width: 56ch; }
+.suggestions { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
+.suggestion { width: 100%; text-align: left; border: 0; background: none; padding: 10px 12px; border-radius: 8px;
+  cursor: pointer; display: grid; gap: 2px; }
+.suggestion:hover { background: var(--surface); box-shadow: inset 0 0 0 1px var(--rule); }
+.suggestion .say { font-family: var(--serif); font-size: 18px; }
+.suggestion .why { font-size: 13px; color: var(--muted); }
+
+.turn { padding: 6px 0 26px; }
+.turn + .turn { border-top: 1px solid var(--rule); padding-top: 26px; }
+.request { font-family: var(--serif); font-size: 22px; line-height: 1.35; margin: 0 0 14px; max-width: 34em; }
+.trail { list-style: none; margin: 0 0 12px; padding: 0; }
+.step { display: flex; gap: 10px; align-items: baseline; font-size: 14px; color: var(--muted); padding: 3px 0; }
+.step svg { flex: none; width: 14px; height: 14px; position: relative; top: 2px; color: var(--faint); }
+.step .what { color: var(--ink); }
+.step .res { color: var(--muted); }
+.step.opened svg { color: var(--brass); }
+.step .private { color: var(--plum); font-weight: 600; }
+.step.working .res::after { content: "…"; }
+.step.error .res { color: var(--seal); }
+
+/* the one raised thing on the page: whatever is waiting for you */
+.slip { background: var(--surface); border-radius: 10px; box-shadow: var(--lift); margin: 14px 0 16px;
+  overflow: hidden; border: 1px solid var(--rule); }
+.slip-head { display: flex; align-items: center; gap: 10px; padding: 12px 18px 10px; font-size: 14px;
+  color: var(--seal); font-weight: 600; }
+.slip-head svg { width: 16px; height: 16px; }
+.slip-body { padding: 0 18px 4px; }
+.fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0 0 12px; font-size: 14px; }
+.fields dt { color: var(--muted); }
+.fields dd { margin: 0; overflow-wrap: anywhere; }
+.letter { font-family: var(--serif); font-size: 16.5px; line-height: 1.55; white-space: pre-wrap; margin: 0 0 14px;
+  padding: 14px 16px; background: var(--paper); border-radius: 8px; }
+.change { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; font-size: 15px; margin: 2px 0 14px; }
+.change s { color: var(--muted); }
+.slip textarea, .slip input[type=text], .ask input { width: 100%; border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--paper); padding: 9px 11px; }
+.slip textarea { font-family: var(--serif); font-size: 16px; line-height: 1.5; min-height: 140px; resize: vertical; }
+.slip label { display: block; font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+.slip .field { margin: 0 0 12px; }
+.slip-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 18px 16px;
+  border-top: 1px solid var(--rule); }
+.btn { border: 1px solid var(--rule); background: var(--surface); border-radius: 8px; padding: 8px 14px;
+  cursor: pointer; font-weight: 600; font-size: 14px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.btn.primary:hover { opacity: .92; }
+.btn.quiet { border-color: transparent; background: none; color: var(--muted); font-weight: 400; }
+.btn.quiet:hover { color: var(--ink); }
+.btn:disabled { opacity: .5; cursor: default; }
+.slip-actions .grow { flex: 1; }
+.cloud-note { font-size: 12.5px; color: var(--muted); padding: 0 18px 14px; margin: -4px 0 0; }
+.polished { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.decline { padding: 0 18px 14px; display: none; }
+.decline.open { display: block; }
+.decline-row { display: flex; gap: 8px; }
+
+/* once you've decided, the slip folds into a stamped line */
+.settled { display: flex; gap: 12px; align-items: center; margin: 12px 0 14px; font-size: 14px; }
+.stamp { font-family: var(--serif); font-weight: 600; font-size: 13px; padding: 2px 10px; border-radius: 999px;
+  border: 1.5px solid currentColor; transform: rotate(-4deg); display: inline-block; white-space: nowrap; }
+.stamp.sent { color: var(--sage); }
+.stamp.not { color: var(--seal); }
+.settled .gist { color: var(--muted); overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: no-preference) {
+  .stamp.fresh { animation: press .42s cubic-bezier(.2, 1.4, .4, 1) both; }
+  @keyframes press { 0% { transform: rotate(-14deg) scale(1.9); opacity: 0; } 100% { transform: rotate(-4deg) scale(1); opacity: 1; } }
+}
+
+.ask { margin: 14px 0 16px; padding: 14px 18px 16px; background: var(--surface); border-radius: 10px;
+  box-shadow: var(--lift); border: 1px solid var(--rule); }
+.ask .q { font-family: var(--serif); font-size: 18px; margin: 0 0 10px; }
+.ask .q::before { content: "Alfred asks: "; font-family: var(--sans); font-size: 13px; color: var(--seal);
+  font-weight: 600; display: block; margin-bottom: 2px; }
+.ask form { display: flex; gap: 8px; }
+.asked { margin: 10px 0 12px; font-size: 14px; }
+.asked .q { color: var(--muted); }
+.asked .a { font-family: var(--serif); font-size: 16px; }
+
+.reply { margin: 10px 0 0; display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; }
+.reply svg { width: 18px; height: 18px; margin-top: 3px; }
+.reply.done svg { color: var(--sage); }
+.reply.cannot svg, .reply.warn svg { color: var(--seal); }
+.reply .text { font-size: 16px; line-height: 1.55; white-space: pre-wrap; }
+.reply .flag { display: block; font-size: 13px; color: var(--seal); font-weight: 600; margin-bottom: 2px; }
+.problem { margin: 10px 0; padding: 10px 14px; border-radius: 8px; background: var(--seal-soft); color: var(--ink);
+  font-size: 14px; }
+
+/* ---------- composer ---------- */
+.composer { border-top: 1px solid var(--rule); padding: 14px clamp(18px, 4vw, 56px) 18px; }
+.composer form { max-width: 720px; display: flex; gap: 10px; align-items: flex-end; }
+.composer textarea { flex: 1; resize: none; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface);
+  padding: 11px 13px; font-family: var(--serif); font-size: 17px; line-height: 1.4; max-height: 160px; }
+.composer .hint { max-width: 720px; font-size: 12.5px; color: var(--faint); margin-top: 6px; }
+
+/* ---------- ledger ---------- */
+.ledger h2 { font-family: var(--serif); font-weight: 600; font-size: 18px; margin: 0 0 10px; }
+.ledger h3 { font-size: 13.5px; font-weight: 600; margin: 22px 0 8px; }
+.tally { display: grid; grid-template-columns: 1fr auto; gap: 7px 10px; margin: 0; font-size: 14px; }
+.tally dt { color: var(--muted); }
+.tally dd { margin: 0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.tally dd.good { color: var(--sage); }
+.tally dd.bad { color: var(--seal); }
+.tally dd.priv { color: var(--plum); }
+.touched { list-style: none; padding: 0; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.touched li { padding: 2px 0 2px 14px; position: relative; overflow-wrap: anywhere; }
+.touched li::before { content: ""; position: absolute; left: 0; top: 9px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--brass); }
+.touched li.private { color: var(--plum); }
+.touched li.private::before { background: var(--plum); border-radius: 1px; }
+.memory { list-style: none; padding: 0; margin: 0; font-size: 13.5px; }
+.memory li { padding: 6px 0; border-bottom: 1px solid var(--rule); }
+.memory .mq { color: var(--muted); display: block; font-size: 12.5px; }
+.ledger .small { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+.ledger .scope { margin: -4px 0 12px; }
+#forget { padding-left: 0; margin-top: 4px; }
+.switch { display: flex; align-items: center; gap: 8px; font-size: 13.5px; margin: 0 0 8px; }
+.privacy { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--muted); }
+.privacy strong { color: var(--ink); }
+
+/* ---------- smaller screens: the side panels become drawers ---------- */
+@media (max-width: 1180px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .drawer-buttons { display: flex; }
+  .world, .ledger { position: fixed; top: 0; bottom: 0; z-index: 20; background: var(--paper); width: min(340px, 88vw);
+    box-shadow: var(--lift); transform: translateX(-105%); transition: transform .2s ease; }
+  .world { left: 0; }
+  .ledger { right: 0; transform: translateX(105%); }
+  .world.open, .ledger.open { transform: none; }
+  .whose { display: none; }
+}
+@media (max-width: 560px) {
+  header { gap: 10px; padding: 12px 16px; }
+  .runs-on { display: none; }
+  .request { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) { .world, .ledger { transition: none; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 16 16"><rect x="1.8" y="3.3" width="12.4" height="9.4" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m2.5 4.5 5.5 4.3 5.5-4.3" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12M5.2 1.6v2.6M10.8 1.6v2.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-person" viewBox="0 0 16 16"><circle cx="8" cy="5.4" r="2.8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.8 14c.7-2.9 2.8-4.3 5.2-4.3s4.5 1.4 5.2 4.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 16 16"><path d="m10.6 2.4 3 3-8.2 8.2-3.7.7.7-3.7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m5 8.3 2 2 4-4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-hand" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 12 12 4" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 1.6 13.4 3.6v4.1c0 3.2-2.2 5.6-5.4 6.7-3.2-1.1-5.4-3.5-5.4-6.7V3.6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 5v3.4M8 10.6v.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-wait" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5V8l2.4 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+<div class="app">
+  <header>
+    <h1 class="wordmark">Alfred</h1>
+    <span class="whose" id="whose"></span>
+    <span class="spacer"></span>
+    <div class="drawer-buttons">
+      <button class="btn quiet" id="open-world" aria-controls="world">Inbox</button>
+      <button class="btn quiet" id="open-ledger" aria-controls="ledger">What it touched</button>
+    </div>
+    <span class="runs-on" id="runs-on"><span class="dot" aria-hidden="true"></span><span></span></span>
+  </header>
+
+  <aside class="world" id="world" aria-label="Email, calendar and contacts">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-tab="emails">Email</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="events">Calendar</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="contacts">People</button>
+    </div>
+    <ul class="records" id="records"></ul>
+    <div class="world-note">
+      <div class="legend"><span class="l-seen">Alfred opened this</span><span class="l-private">Private</span></div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="thread" id="thread" aria-live="polite">
+      <div class="thread-inner" id="turns">
+        <section class="empty" id="empty">
+          <h2>What should Alfred take care of?</h2>
+          <p>Alfred works on the email, calendar and contacts on the left. It asks when your request is unclear, tells you when something can't be done, and sends nothing until you approve it.</p>
+          <ul class="suggestions" id="suggestions"></ul>
+        </section>
+      </div>
+    </div>
+    <div class="composer">
+      <form id="ask-form">
+        <label class="visually-hidden" for="ask-input">Your request</label>
+        <textarea id="ask-input" rows="1" placeholder="Ask Alfred to do something…" autocomplete="off"></textarea>
+        <button class="btn primary" id="send-btn" type="submit">Ask Alfred</button>
+        <button class="btn" id="stop-btn" type="button" hidden>Stop</button>
+      </form>
+      <div class="hint">Enter to send. Shift+Enter for a new line.</div>
+    </div>
+  </main>
+
+  <aside class="ledger" id="ledger" aria-label="What Alfred touched">
+    <h2>What Alfred touched</h2>
+    <p class="small scope" id="scope">Your last request will show up here.</p>
+    <dl class="tally" id="tally"></dl>
+    <ul class="touched" id="touched"></ul>
+    <h3>What Alfred remembers</h3>
+    <label class="switch"><input type="checkbox" id="use-memory"> Use answers from earlier conversations</label>
+    <ul class="memory" id="memory"></ul>
+    <button class="btn quiet" id="forget" type="button">Forget everything</button>
+    <div class="privacy" id="privacy"></div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const rich = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function when(v) {  // "2026-10-06T14:00" -> "Tue, Oct 6, 2:00 PM"
+  const m = /^(\d{4})-(\d\d)-(\d\d)(?:[T ](\d\d):(\d\d))?/.exec(v || "");
+  if (!m) return v || "";
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0));
+  const h = d.getHours() % 12 || 12, ap = d.getHours() < 12 ? "AM" : "PM";
+  return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}` + (m[4] ? `, ${h}:${String(d.getMinutes()).padStart(2, "0")} ${ap}` : "");
+}
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `The app answered ${r.status}.`);
+  return data;
+}
+
+const state = {since: 0, world: null, tab: "emails", seen: new Set(), turn: null, steps: {}, slips: {},
+  tally: null, open: new Set(), names: {}};
+
+/* ---------- world panel ---------- */
+function recordLabel(id) {
+  const w = state.world;
+  if (!w) return id;
+  const r = w.emails.find((e) => e.id === id) || w.events.find((e) => e.id === id) || w.contacts.find((c) => c.id === id);
+  return r ? (r.subject || r.title || r.name) : id;
+}
+function renderRecords() {
+  const w = state.world, list = $("#records");
+  if (!w) return;
+  const rows = state.tab === "emails" ? w.emails : state.tab === "events" ? w.events : w.contacts;
+  list.innerHTML = rows.map((r) => {
+    const title = r.subject || r.title || r.name;
+    const meta = state.tab === "emails" ? `${r.folder === "sent" ? "To " + r.to.join(", ") : r.from}, ${r.date}`
+      : state.tab === "events" ? `${r.start} to ${r.end}${r.location ? ", " + r.location : ""}` : `${r.role}${r.email ? ", " + r.email : ""}`;
+    const cls = ["record", state.seen.has(r.id) ? "seen" : "", r.private ? "private" : ""].join(" ");
+    const open = state.open.has(r.id);
+    return `<li class="${cls}" data-id="${esc(r.id)}"><button aria-expanded="${open}"><span class="mark" aria-hidden="true"></span>
+      <span class="title">${esc(title)}${r.folder === "sent" ? '<span class="folder">Sent</span>' : ""}</span>
+      <span class="meta">${esc(meta)}</span>${r.private ? '<span class="visually-hidden">Private.</span>' : ""}
+      ${state.seen.has(r.id) ? '<span class="visually-hidden">Alfred opened this.</span>' : ""}</button>
+      ${open ? detail(r) : ""}</li>`;
+  }).join("");
+}
+function detail(r) {
+  if (state.tab === "emails")
+    return `<div class="detail"><dl><dt>From</dt><dd>${esc(r.from)}</dd><dt>To</dt><dd>${esc(r.to.join(", "))}</dd><dt>Date</dt><dd>${esc(r.date)}</dd></dl>${esc(r.body)}</div>`;
+  if (state.tab === "events")
+    return `<div class="detail"><dl><dt>When</dt><dd>${esc(r.start)} to ${esc(r.end)}</dd><dt>Where</dt><dd>${esc(r.location || "Not set")}</dd><dt>With</dt><dd>${esc(r.attendees.join(", ") || "Nobody")}</dd></dl>${esc(r.notes)}</div>`;
+  return `<div class="detail"><dl><dt>Email</dt><dd>${esc(r.email)}</dd><dt>Phone</dt><dd>${esc(r.phone)}</dd>${r.address ? `<dt>Address</dt><dd>${esc(r.address)}</dd>` : ""}</dl>${esc(r.notes)}</div>`;
+}
+$("#records").addEventListener("click", (e) => {
+  const li = e.target.closest(".record");
+  if (!li || !e.target.closest("button")) return;
+  const id = li.dataset.id;
+  state.open.has(id) ? state.open.delete(id) : state.open.add(id);
+  renderRecords();
+});
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => {
+  state.tab = t.dataset.tab;
+  document.querySelectorAll(".tab").forEach((x) => x.setAttribute("aria-selected", String(x === t)));
+  renderRecords();
+}));
+
+async function loadWorld() {
+  const w = state.world = await api("/api/world");
+  state.names = Object.fromEntries(w.contacts.map((c) => [c.email, c.name]));
+  $("#whose").innerHTML = `Working on <b>${esc(w.user.name)}</b>'s email, calendar and contacts (a simulated person). Today is ${esc(w.now)}.`;
+  $("#runs-on span:last-child").textContent = `${w.model}, on this computer`;
+  $("#suggestions").innerHTML = w.suggestions.map((s) =>
+    `<li><button class="suggestion" data-text="${esc(s.text)}"><span class="say">${esc(s.text)}</span><span class="why">${esc(s.why)}</span></button></li>`).join("");
+  $("#use-memory").checked = w.use_memory;
+  renderMemory();
+  $("#privacy").innerHTML = w.polish
+    ? `<strong>Private by default.</strong> Alfred and your data stay on this computer. The one exception is the <em>Polish</em> button on an email draft, which sends that draft (and nothing else) to Nemotron 3 Super on Nebius Token Factory.`
+    : `<strong>Private by default.</strong> Alfred and your data stay on this computer. Nothing is sent anywhere else.`;
+  renderRecords();
+}
+function renderMemory() {
+  const items = state.world?.memory || [];
+  $("#memory").innerHTML = items.length ? items.slice().reverse().map((m) =>
+    `<li><span class="mq">${esc(m.question)}</span>${esc(m.answer)}</li>`).join("") : `<li class="small">Nothing yet. When Alfred asks you something, your answer shows up here.</li>`;
+  $("#forget").hidden = !items.length;
+}
+$("#use-memory").addEventListener("change", (e) => api("/api/memory", {use: e.target.checked}));
+$("#forget").addEventListener("click", async () => { await api("/api/memory", {clear: true}); state.world.memory = []; renderMemory(); });
+
+/* ---------- the ledger for the current request ---------- */
+function resetTally() {
+  state.tally = {opened: [], private: [], sent: 0, declined: 0, asked: 0, flags: 0};
+  renderTally();
+}
+function renderTally() {
+  const t = state.tally;
+  if (!t) { $("#tally").innerHTML = ""; return; }
+  $("#scope").textContent = "For your last request.";
+  $("#tally").innerHTML = `
+    <dt>Records opened</dt><dd>${t.opened.length}</dd>
+    <dt>Private records opened</dt><dd class="${t.private.length ? "priv" : "good"}">${t.private.length}</dd>
+    <dt>Drafts you approved</dt><dd>${t.sent}</dd>
+    <dt>Drafts you turned down</dt><dd>${t.declined}</dd>
+    <dt>Questions it asked you</dt><dd>${t.asked}</dd>
+    <dt>Suspicious requests flagged</dt><dd class="${t.flags ? "bad" : ""}">${t.flags}</dd>`;
+  $("#touched").innerHTML = t.opened.map((id) =>
+    `<li class="${t.private.includes(id) ? "private" : ""}">${esc(recordLabel(id))}${t.private.includes(id) ? " (private)" : ""}</li>`).join("");
+}
+
+/* ---------- the conversation ---------- */
+const VERB = {
+  search_emails: (a) => `Searched email for “${a.query ?? ""}”`,
+  search_calendar: (a) => `Searched the calendar${a.query ? ` for “${a.query}”` : ""}${a.start_date ? `, ${when(a.start_date)}${a.end_date && a.end_date !== a.start_date ? " to " + when(a.end_date) : ""}` : ""}`,
+  search_contacts: (a) => `Looked up “${a.query ?? ""}” in contacts`,
+  read_email: () => "Opening an email", get_event: () => "Opening an event", get_contact: () => "Opening a contact",
+};
+const ICON = {search_emails: "search", search_calendar: "search", search_contacts: "search", read_email: "mail", get_event: "cal", get_contact: "person"};
+
+function newTurn(text) {
+  $("#empty")?.remove();
+  const sec = document.createElement("section");
+  sec.className = "turn";
+  sec.innerHTML = `<p class="request">${esc(text)}</p><ol class="trail"></ol><div class="outcome"></div>`;
+  $("#turns").appendChild(sec);
+  state.turn = sec;
+  resetTally();
+  return sec;
+}
+const trail = () => $(".trail", state.turn);
+const outcome = () => $(".outcome", state.turn);
+
+function onCall(ev) {
+  if (!VERB[ev.tool]) return;
+  const li = document.createElement("li");
+  li.className = "step working";
+  li.innerHTML = `${icon(ICON[ev.tool])}<span><span class="what">${esc(VERB[ev.tool](ev.args || {}))}</span> <span class="res"></span></span>`;
+  trail().appendChild(li);
+  state.steps.last = li;
+}
+function onResult(ev) {
+  const li = state.steps.last;
+  if (!li) return;
+  li.classList.remove("working");
+  const rec = (ev.records || [])[0];
+  if (ev.text.startsWith("Error")) { li.classList.add("error"); $(".res", li).textContent = ev.text; return; }
+  if (rec && rec.opened) {
+    li.classList.add("opened");
+    const kind = ev.tool === "read_email" ? "Opened the email" : ev.tool === "get_event" ? "Opened the event" : "Opened the contact";
+    $(".what", li).textContent = `${kind} “${rec.label}”`;
+    $(".res", li).innerHTML = rec.private ? `<span class="private">Private</span>` : "";
+    state.seen.add(rec.id);
+    if (!state.tally.opened.includes(rec.id)) state.tally.opened.push(rec.id);
+    if (rec.private && !state.tally.private.includes(rec.id)) state.tally.private.push(rec.id);
+    renderTally(); renderRecords();
+  } else {
+    $(".res", li).textContent = ev.text ? `(${ev.text})` : "";
+  }
+}
+
+function people(list) { return (list || []).map((x) => state.names[x] ? `${state.names[x]} <${x}>` : x).join(", "); }
+function slipContent(ev) {
+  const a = ev.action;
+  if (ev.kind === "email") return {head: "Draft email, waiting for you", yes: "Send", no: "Don't send",
+    body: `<dl class="fields"><dt>To</dt><dd>${esc(people(a.to))}</dd>${a.cc?.length ? `<dt>Cc</dt><dd>${esc(people(a.cc))}</dd>` : ""}<dt>Subject</dt><dd data-show="subject">${esc(a.subject)}</dd></dl><p class="letter" data-show="body">${esc(a.body)}</p>`};
+  if (ev.kind === "forward") return {head: "Forward, waiting for you", yes: "Forward", no: "Don't forward",
+    body: `<dl class="fields"><dt>To</dt><dd>${esc(people(a.to))}</dd><dt>Forwarding</dt><dd>${esc(recordLabel(a.email_id))}</dd></dl>${a.note ? `<p class="letter" data-show="note">${esc(a.note)}</p>` : ""}`};
+  if (ev.kind === "event_change") {
+    const b = a.before, f = a.after;
+    const rows = [];
+    if (b.start_at !== f.start_at || b.end_at !== f.end_at) rows.push(`<s>${esc(when(b.start_at))}</s><span>${esc(when(f.start_at))}</span>`);
+    if (b.title !== f.title) rows.push(`<s>${esc(b.title)}</s><span>${esc(f.title)}</span>`);
+    if (b.location !== f.location) rows.push(`<s>${esc(b.location)}</s><span>${esc(f.location)}</span>`);
+    return {head: "Calendar change, waiting for you", yes: "Save change", no: "Don't change it",
+      body: `<dl class="fields"><dt>Event</dt><dd>${esc(b.title)}</dd>${a.notify?.length ? `<dt>Then email</dt><dd>${esc(people(a.notify))}</dd>` : ""}</dl>${rows.map((r) => `<div class="change">${r}</div>`).join("")}`};
+  }
+  return {head: "New event, waiting for you", yes: "Add to calendar", no: "Don't add it",
+    body: `<dl class="fields"><dt>Title</dt><dd data-show="title">${esc(a.title)}</dd><dt>When</dt><dd>${esc(when(a.start_at))} to ${esc(when(a.end_at).split(", ").pop())}</dd><dt>Invite</dt><dd>${esc(people(a.attendees) || "Nobody")}</dd>${a.location ? `<dt>Where</dt><dd data-show="location">${esc(a.location)}</dd>` : ""}</dl>`};
+}
+function onApproval(ev) {
+  const c = slipContent(ev);
+  const div = document.createElement("div");
+  div.className = "slip";
+  div.dataset.pending = ev.pending_id;
+  const canPolish = ev.kind === "email" && state.world?.polish;
+  div.innerHTML = `<div class="slip-head">${icon("pen")}<span>${c.head}</span></div>
+    <div class="slip-body"><div class="view">${c.body}</div><div class="edit" hidden></div></div>
+    <div class="slip-actions">
+      <button class="btn primary" data-act="yes">${c.yes}</button>
+      ${ev.editable?.length ? `<button class="btn" data-act="edit">Edit</button>` : ""}
+      ${canPolish ? `<button class="btn" data-act="polish">Polish with Nemotron 3 Super</button>` : ""}
+      <span class="grow"></span>
+      <button class="btn quiet" data-act="no">${c.no}</button>
+    </div>
+    ${canPolish ? `<p class="cloud-note">Polish sends only this draft's subject and body to Nemotron 3 Super on Nebius Token Factory.</p>` : ""}
+    <form class="decline"><label for="why-${ev.pending_id}">Tell Alfred why (optional)</label>
+      <div class="decline-row"><input type="text" id="why-${ev.pending_id}" placeholder="For example: wrong person, or not now">
+      <button class="btn" type="submit">${c.no}</button></div></form>`;
+  state.slips[ev.pending_id] = {ev, el: div, editing: false};
+  outcome().appendChild(div);
+  wireSlip(ev, div);
+  $("button[data-act=yes]", div).focus({preventScroll: true});
+  scrollDown();
+}
+function editFields(ev, values) {
+  return ev.editable.map((k) => {
+    const v = values[k] ?? ev.action[k] ?? "";
+    const id = `${ev.pending_id}-${k}`;
+    return k === "body" || k === "note"
+      ? `<div class="field"><label for="${id}">${k === "body" ? "Message" : "Note"}</label><textarea id="${id}" data-key="${k}">${esc(v)}</textarea></div>`
+      : `<div class="field"><label for="${id}">${k[0].toUpperCase() + k.slice(1)}</label><input type="text" id="${id}" data-key="${k}" value="${esc(v)}"></div>`;
+  }).join("");
+}
+function startEditing(ev, div, values = {}, note = "") {
+  const s = state.slips[ev.pending_id];
+  s.editing = true;
+  $(".view", div).hidden = true;
+  const edit = $(".edit", div);
+  edit.hidden = false;
+  edit.innerHTML = (note ? `<p class="polished">${note}</p>` : "") + editFields(ev, values);
+  $("[data-act=edit]", div)?.setAttribute("hidden", "");
+  $("[data-act=yes]", div).textContent = ev.kind === "email" ? "Send as edited" : "Save as edited";
+  $("textarea, input", edit)?.focus();
+}
+function wireSlip(ev, div) {
+  div.addEventListener("click", async (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) return;
+    if (act === "edit") return startEditing(ev, div);
+    if (act === "no") { $(".decline", div).classList.add("open"); $(".decline input", div).focus(); return; }
+    if (act === "polish") {
+      const btn = e.target.closest("button");
+      btn.disabled = true; btn.textContent = "Polishing…";
+      try {
+        const out = await api("/api/polish", {pending_id: ev.pending_id});
+        startEditing(ev, div, out, "Polished by Nemotron 3 Super. Check it before you send it.");
+        btn.remove();
+      } catch (err) { btn.disabled = false; btn.textContent = "Polish with Nemotron 3 Super"; showProblem(err.message); }
+      return;
+    }
+    if (act === "yes") {
+      const edits = {};
+      if (state.slips[ev.pending_id].editing)
+        div.querySelectorAll(".edit [data-key]").forEach((f) => { if (f.value !== (ev.action[f.dataset.key] ?? "")) edits[f.dataset.key] = f.value; });
+      await respond(ev.pending_id, {approve: true, edits});
+    }
+  });
+  $(".decline", div).addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await respond(ev.pending_id, {approve: false, feedback: $(".decline input", div).value});
+  });
+}
+async function respond(pendingId, response) {
+  document.querySelectorAll(`[data-pending="${pendingId}"] button`).forEach((b) => (b.disabled = true));
+  try { await api("/api/respond", {pending_id: pendingId, response}); poll(true); }
+  catch (err) { showProblem(err.message); }
+}
+function onDecision(ev) {
+  const s = state.slips[ev.pending_id];
+  const div = s?.el;
+  const sent = ev.approved;
+  const k = s?.ev.kind;
+  const label = sent ? ({email: "Sent", forward: "Forwarded", event_change: "Saved", new_event: "Added"}[k] || "Done")
+                     : ({email: "Not sent", forward: "Not forwarded", event_change: "Not changed", new_event: "Not added"}[k] || "Declined");
+  const gist = sent ? (ev.result || "") + (ev.edited ? " You edited it first." : "") : (ev.feedback || "");
+  const line = document.createElement("div");
+  line.className = "settled";
+  line.innerHTML = `<span class="stamp ${sent ? "sent" : "not"} fresh">${label}</span><span class="gist">${esc(gist)}</span>`;
+  if (div) div.replaceWith(line); else outcome().appendChild(line);
+  sent ? state.tally.sent++ : state.tally.declined++;
+  renderTally();
+  if (sent) loadWorld();
+}
+function onQuestion(ev) {
+  const div = document.createElement("div");
+  div.className = "ask";
+  div.dataset.pending = ev.pending_id;
+  div.innerHTML = `<p class="q">${esc(ev.question)}</p><form><label class="visually-hidden" for="a-${ev.pending_id}">Your answer</label>
+    <input type="text" id="a-${ev.pending_id}" autocomplete="off" placeholder="Your answer"><button class="btn primary" type="submit">Answer</button></form>`;
+  $("form", div).addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = $("input", div).value.trim();
+    if (!text) return $("input", div).focus();
+    await respond(ev.pending_id, {text});
+  });
+  state.slips[ev.pending_id] = {ev, el: div};
+  outcome().appendChild(div);
+  $("input", div).focus({preventScroll: true});
+  state.tally.asked++;
+  renderTally();
+  scrollDown();
+}
+function onAnswer(ev) {
+  const div = outcome().querySelector(".ask");
+  const q = div ? $(".q", div).textContent : "";
+  const done = document.createElement("div");
+  done.className = "asked";
+  done.innerHTML = `<div class="q">Alfred asked: ${esc(q)}</div><div class="a">${esc(ev.text)}</div>`;
+  div ? div.replaceWith(done) : outcome().appendChild(done);
+}
+function onFinal(ev) {
+  const cls = ev.warned ? "warn" : ev.status === "cannot_do" ? "cannot" : ev.status === "stopped" ? "cannot" : "done";
+  const flag = ev.warned ? "Flagged something suspicious" : ev.status === "cannot_do" ? "Can't do this" : "";
+  const div = document.createElement("div");
+  div.className = `reply ${cls}`;
+  div.innerHTML = `${icon(ev.warned ? "shield" : cls === "done" ? "check" : "hand")}<div class="text">${flag ? `<span class="flag">${flag}</span>` : ""}${rich(ev.message)}</div>`;
+  outcome().appendChild(div);
+  if (ev.warned) { state.tally.flags++; renderTally(); }
+  scrollDown();
+}
+function onPolish() { /* the slip already shows the suggestion */ }
+function showProblem(msg) {
+  const p = document.createElement("div");
+  p.className = "problem";
+  p.textContent = msg;
+  (state.turn ? outcome() : $("#turns")).appendChild(p);
+  scrollDown();
+}
+function onError(ev) { showProblem(`Alfred stopped: ${ev.message}. Is the model server running?`); }
+
+const HANDLERS = {request: (e) => newTurn(e.text), call: onCall, result: onResult, approval: onApproval,
+  decision: onDecision, question: onQuestion, answer: onAnswer, final: onFinal, polish: onPolish, error: onError,
+  done: () => { loadWorld(); }};
+
+function scrollDown() { const t = $("#thread"); t.scrollTo({top: t.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"}); }
+
+let polling = false, timer = null;
+async function poll(now) {
+  if (polling) return;
+  clearTimeout(timer);
+  polling = true;
+  try {
+    const out = await api(`/api/events?since=${state.since}`);
+    for (const ev of out.events) {
+      state.since = Math.max(state.since, ev.id);
+      try { HANDLERS[ev.type]?.(ev); } catch (err) { console.error(err); }
+    }
+    if (out.events.length) scrollDown();
+    setBusy(out.running);
+  } catch (err) { /* the app may be restarting; try again */ }
+  polling = false;
+  timer = setTimeout(poll, document.hidden ? 3000 : 600);
+}
+function setBusy(running) {
+  $("#send-btn").hidden = running;
+  $("#stop-btn").hidden = !running;
+  $("#ask-input").disabled = running;
+}
+
+/* ---------- composer ---------- */
+async function send(text) {
+  text = text.trim();
+  if (!text) return;
+  try { await api("/api/request", {text}); $("#ask-input").value = ""; grow(); setBusy(true); poll(true); }
+  catch (err) { showProblem(err.message); }
+}
+function grow() { const t = $("#ask-input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
+$("#ask-input").addEventListener("input", grow);
+$("#ask-input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(e.target.value); } });
+$("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); send($("#ask-input").value); });
+$("#stop-btn").addEventListener("click", () => api("/api/stop", {}));
+$("#suggestions").addEventListener("click", (e) => { const b = e.target.closest(".suggestion"); if (b) send(b.dataset.text); });
+
+/* ---------- drawers on small screens ---------- */
+function toggle(id) { const el = document.getElementById(id); el.classList.toggle("open"); }
+$("#open-world").addEventListener("click", () => toggle("world"));
+$("#open-ledger").addEventListener("click", () => toggle("ledger"));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".world.open, .ledger.open").forEach((el) => el.classList.remove("open")); });
+
+renderTally();
+loadWorld().then(() => poll(true)).catch((err) => showProblem(`Couldn't load the inbox: ${err.message}`));
+</script>
+</body>
+</html>

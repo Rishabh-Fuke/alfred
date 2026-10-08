@@ -20,5 +20,8 @@ train = ["torch", "transformers>=4.56", "peft>=0.17", "accelerate", "safetensors
 [tool.setuptools.packages.find]
 include = ["alfred*"]
 
+[tool.setuptools.package-data]
+"alfred.app" = ["static/*.html", "static/fonts/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

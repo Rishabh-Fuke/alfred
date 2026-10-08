@@ -111,3 +111,25 @@ def test_resume_skips_finished_episodes(tmp_path):
     first = (run / "results.jsonl").read_text()
     alfred_eval.main(["--agent", "oracle", "--worlds", "1", "--resume", str(run)])
     assert (run / "results.jsonl").read_text() == first
+
+
+def test_parse_xml_tool_calls():
+    from alfred.agents.llm import parse_xml_tool_calls
+    text = ("<tool_call>\n<function=draft_email>\n<parameter=to>\n[\"a@b.example\"]\n</parameter>\n"
+            "<parameter=subject>\nLunch?\n</parameter>\n<parameter=body>\nHi,\n\nFriday works.\n</parameter>\n"
+            "</function>\n</tool_call>\n<tool_call>\n<function=search_emails>\n<parameter=limit>\n5\n</parameter>\n"
+            "<parameter=query>\nflight\n</parameter>\n</function>\n</tool_call>")
+    assert parse_xml_tool_calls(text) == [
+        ("draft_email", {"to": ["a@b.example"], "subject": "Lunch?", "body": "Hi,\n\nFriday works."}),
+        ("search_emails", {"limit": 5, "query": "flight"})]
+    assert parse_xml_tool_calls("It's at 3pm.") == []
+
+
+def test_native_mode_recovers_xml_calls_a_server_left_as_text():
+    task = next(t for t in generate_tasks(1000, 1) if t.template == "impossible_request")
+    reply = ("<tool_call>\n<function=finish>\n<parameter=status>\ncannot_do\n</parameter>\n<parameter=message>\n"
+             "I can't do that.\n</parameter>\n</function>\n</tool_call>")
+    env = Environment(task)
+    stats = OpenAICompatAgent("stub", client=_StubClient([reply]), tool_mode="native").run(env)
+    m = env.metrics()
+    assert m["success"] and stats["recovered_calls"] == 1 and m["format_issues"] == 1
