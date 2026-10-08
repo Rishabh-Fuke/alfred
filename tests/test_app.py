@@ -22,17 +22,16 @@ def _call(base, path, payload=None):
 
 
 def _wait(base, since, want, timeout=20):
+    """The first `want` event after event id `since`. Returns it, its id (to wait from next) and the events up to it."""
     deadline = time.time() + timeout
-    seen = []
     while time.time() < deadline:
         _, out = _call(base, f"/api/events?since={since}")
-        seen += out["events"]
-        since = max([e["id"] for e in out["events"]] + [since])
-        hit = [e for e in seen if e["type"] == want]
-        if hit:
-            return hit[-1], since, seen
+        events = out["events"]
+        hit = next((i for i, e in enumerate(events) if e["type"] == want), None)
+        if hit is not None:
+            return events[hit], events[hit]["id"], events[:hit + 1]
         time.sleep(0.05)
-    raise AssertionError(f"no {want} event; saw {[e['type'] for e in seen]}")
+    raise AssertionError(f"no {want} event after {since}; saw {[e['type'] for e in events]}")
 
 
 @pytest.fixture
