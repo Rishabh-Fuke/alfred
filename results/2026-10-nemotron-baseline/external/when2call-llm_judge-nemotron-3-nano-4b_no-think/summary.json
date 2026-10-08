@@ -1,0 +1,53 @@
+{
+  "items": 300,
+  "by_label": {
+    "tool_call": {
+      "value": 0.94,
+      "lo": 0.89,
+      "hi": 0.98,
+      "n": 100
+    },
+    "request_for_info": {
+      "value": 0.59,
+      "lo": 0.5,
+      "hi": 0.69,
+      "n": 100
+    },
+    "cannot_answer": {
+      "value": 0.32,
+      "lo": 0.23,
+      "hi": 0.41,
+      "n": 100
+    }
+  },
+  "confusion": {
+    "tool_call": {
+      "tool_call": 94,
+      "request_for_info": 4,
+      "direct_answer": 2
+    },
+    "request_for_info": {
+      "tool_call": 41,
+      "request_for_info": 59
+    },
+    "cannot_answer": {
+      "tool_call": 35,
+      "cannot_answer": 32,
+      "direct_answer": 12,
+      "request_for_info": 21
+    }
+  },
+  "macro_f1": 0.6074830429902893,
+  "accuracy": {
+    "value": 0.6166666666666667,
+    "lo": 0.5633333333333334,
+    "hi": 0.67,
+    "n": 300
+  },
+  "tool_hallucination": {
+    "value": 0.058823529411764705,
+    "lo": 0.0,
+    "hi": 0.17647058823529413,
+    "n": 17
+  }
+}

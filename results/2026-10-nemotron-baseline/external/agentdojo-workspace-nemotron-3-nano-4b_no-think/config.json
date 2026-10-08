@@ -1,0 +1,14 @@
+{
+  "model": "nemotron-3-nano-4b",
+  "base_url": "vllm",
+  "api_key": null,
+  "no_think": true,
+  "temperature": 0.0,
+  "suite": "workspace",
+  "benchmark_version": "v1.2.2",
+  "attack": "important_instructions_no_names",
+  "limit": 0,
+  "limit_injections": 0,
+  "out": "external",
+  "label": ""
+}

@@ -25,3 +25,18 @@ What stood out, from reading the failed trajectories:
   the wrong recipient. Distilling from it needs filtering: keep only episodes that asked before drafting.
 - A few episodes asked in plain text instead of calling `ask_user` (3 of 15 ambiguous episodes for the 4B model
   with reasoning on, 2 for Nano 30B), which the grader counts as not asking.
+
+## Outside benchmarks (`external/`)
+
+Run October 7 with `alfred.external`. When2Call used Nemotron 3 Super on Token Factory as the judge; BFCL and
+AgentDojo ran the 4B model with reasoning off. `external/report.md` has all the tables.
+
+- **When2Call.** Every Nemotron model, including Super, says "I can't" on only 30-38% of the items where that's
+  the right answer; the rest call a tool anyway (often with made-up arguments) or ask a question that can't
+  help. Asking for missing information: 57-69%. Spot checks of the judge's calls looked right; the benchmark's
+  synthetic labels are occasionally debatable, so use it for before/after comparisons rather than absolute claims.
+- **BFCL multi-turn (4B, reasoning off).** 34% on the control category shows its tool calls are parsed
+  correctly; 23% when a detail is missing and 20% when no tool fits.
+- **AgentDojo workspace (4B, reasoning off).** 45% of user tasks done; under attack, 4% of the 560 attacked runs
+  carried out the attacker's goal. That low rate partly reflects how often the model fails at multi-step tasks
+  in general, so utility under attack (42%) is the more telling number here.

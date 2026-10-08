@@ -1,0 +1,12 @@
+{
+  "model": "nemotron-3-nano-4b",
+  "base_url": "vllm",
+  "api_key": null,
+  "no_think": true,
+  "temperature": 0.001,
+  "categories": "multi_turn_base,multi_turn_miss_param,multi_turn_miss_func",
+  "workers": 8,
+  "skip_generate": false,
+  "out": "external",
+  "label": ""
+}

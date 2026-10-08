@@ -1,0 +1,17 @@
+{
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "base_url": "tokenfactory",
+  "api_key": null,
+  "no_think": false,
+  "subset": "llm_judge",
+  "judge": "model",
+  "judge_model": "nvidia/nemotron-3-super-120b-a12b",
+  "judge_base_url": "tokenfactory",
+  "temperature": 0.0,
+  "max_tokens": 8192,
+  "timeout": 600.0,
+  "workers": 8,
+  "limit": 0,
+  "out": "external",
+  "label": ""
+}
