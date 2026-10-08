@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "alfred"
 version = "0.1.0"
-description = "RL environment and eval harness for private, local personal agents"
+description = "An RL environment, eval harness and training pipeline that teaches small local agents judgment"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["openai>=1.40"]
@@ -14,6 +14,8 @@ dependencies = ["openai>=1.40"]
 dev = ["pytest>=8"]
 # Outside benchmarks (alfred.external). Install in their own environment: they pin their own dependencies.
 external = ["agentdojo>=0.1.35", "bfcl-eval>=2026.3.23", "soundfile"]
+# Training (alfred.train). On a GPU machine with vLLM installed, this reuses vLLM's torch and transformers.
+train = ["torch", "transformers>=4.56", "peft>=0.17", "accelerate", "safetensors", "huggingface_hub", "kernels"]
 
 [tool.setuptools.packages.find]
 include = ["alfred*"]
