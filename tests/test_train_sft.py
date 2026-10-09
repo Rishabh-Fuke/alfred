@@ -37,3 +37,15 @@ def test_sft_learns_and_resumes(tiny_model_dir, dataset, tmp_path):
     vals = [r["val_loss"] for r in log if "val_loss" in r]
     assert vals[-1] < 0.97 * vals[0], vals
     assert len(first_steps) < len(steps)
+
+
+def test_lora_works_with_an_incompatible_torchao_installed(tiny_model_dir, monkeypatch):
+    """Colab ships an old torchao that makes PEFT refuse to add LoRA; Alfred treats it as absent."""
+    import peft.tuners.lora.torchao as pt
+    from alfred.train.model import add_lora, load_model
+
+    def old_torchao():
+        raise ImportError("Found an incompatible version of torchao. Found version 0.10.0")
+    monkeypatch.setattr(pt, "is_torchao_available", old_torchao)
+    model = add_lora(load_model(str(tiny_model_dir), use_kernels=False), r=4, alpha=8)
+    assert any("lora_A" in n for n, _ in model.named_parameters())

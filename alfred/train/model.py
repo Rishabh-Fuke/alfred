@@ -78,8 +78,23 @@ def lora_target_names(model, wanted=LORA_TARGETS) -> list[str]:
     return names
 
 
+def _ignore_incompatible_torchao() -> None:
+    """PEFT checks for torchao (a quantization library) while adding LoRA layers, and raises if an old version is
+    installed (Colab ships one), even for a model that isn't torchao-quantized, like ours. Treat it as absent."""
+    try:
+        import peft.tuners.lora.torchao as pt
+    except ImportError:
+        return
+    try:
+        pt.is_torchao_available()
+    except ImportError as e:
+        print(f"Ignoring torchao ({str(e)[:120]}); the model isn't torchao-quantized.")
+        pt.is_torchao_available = lambda: False
+
+
 def add_lora(model, r: int = 32, alpha: int = 64, dropout: float = 0.0, targets=LORA_TARGETS):
     from peft import LoraConfig, get_peft_model
+    _ignore_incompatible_torchao()
     cfg = LoraConfig(r=r, lora_alpha=alpha, lora_dropout=dropout, target_modules=lora_target_names(model, targets),
                      bias="none", task_type="CAUSAL_LM")
     return get_peft_model(model, cfg)
@@ -88,6 +103,7 @@ def add_lora(model, r: int = 32, alpha: int = 64, dropout: float = 0.0, targets=
 def load_lora(model, path: str, trainable: bool = True, adapter_name: str = "default"):
     """Attach a saved adapter. With trainable=True it keeps training from there."""
     from peft import PeftModel
+    _ignore_incompatible_torchao()
     if isinstance(model, PeftModel):
         model.load_adapter(path, adapter_name=adapter_name, is_trainable=trainable)
         return model

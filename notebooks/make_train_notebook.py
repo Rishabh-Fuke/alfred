@@ -84,6 +84,15 @@ assert os.path.exists('/content/alfred/alfred/realism/build.py'), (
 # vLLM first (it pins torch and transformers), then the training extras on top of those versions.
 subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '-U', 'vllm'], check=True)
 subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '-e', '/content/alfred[train]'], check=True)
+# The Mamba layers' fast GPU kernels: this transformers wants kernels 0.16.x (newer ones are refused, and training
+# silently falls back to slow plain-PyTorch code). Colab's preinstalled torchao is too old for PEFT, which then
+# refuses to add LoRA at all; nothing here uses torchao, so remove it.
+subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'kernels>=0.16,<0.17'], check=True)
+subprocess.run([sys.executable, '-m', 'pip', 'uninstall', '-q', '-y', 'torchao'], check=True)
+print(subprocess.run([sys.executable, '-c', 'import torch, transformers, peft, vllm, kernels; print("torch", '
+                      'torch.__version__, "| transformers", transformers.__version__, "| peft", peft.__version__, '
+                      '"| vllm", vllm.__version__, "| kernels", kernels.__version__)'],
+                     capture_output=True, text=True).stdout)
 PARSER = '/content/nano_v3_reasoning_parser.py'
 if not os.path.exists(PARSER):
     urllib.request.urlretrieve('https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/resolve/main/'
