@@ -189,10 +189,21 @@ def main(argv=None):
         models = [a.agent]
 
     name = a.label or ("-".join(models) if len(models) <= 2 else f"{len(models)}-models")
+    pack_id = tasks[0].pack_id if tasks else ""
+    if a.resume and (Path(a.resume) / "config.json").exists():
+        old = json.loads((Path(a.resume) / "config.json").read_text())
+        if old.get("pack_id", "") != pack_id:
+            # Realistic tasks built from another content pack aren't the same tasks: start a fresh run beside it.
+            print(f"{a.resume} used content pack {old.get('pack_id') or 'none'}; this run uses {pack_id or 'none'}, "
+                  f"so it starts a new run instead of resuming.")
+            name = a.label or Path(a.resume).name.split("-", 2)[-1]
+            a.out, a.resume = str(Path(a.resume).parent), ""
     run_dir = Path(a.resume) if a.resume else Path(a.out) / f"{datetime.now():%Y%m%d-%H%M%S}-{_slug(name)}"
+    while not a.resume and run_dir.exists():  # two runs started within the same second
+        run_dir = run_dir.with_name(run_dir.name.replace("-", "x-", 1))
     run_dir.mkdir(parents=True, exist_ok=True)
     meta = {**vars(a), "api_key": "***" if a.api_key else None, "base_url": resolve_endpoint(a.base_url, None)[0],
-            "n_tasks": len(tasks), "started": datetime.now().isoformat(timespec="seconds")}
+            "n_tasks": len(tasks), "pack_id": pack_id, "started": datetime.now().isoformat(timespec="seconds")}
     (run_dir / "config.json").write_text(json.dumps(meta, indent=2))
 
     if a.agent == "llm":

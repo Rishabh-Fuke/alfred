@@ -130,6 +130,12 @@ def progress(label):
 
 
 def finished(label, episodes):
+    # Done, and (for realistic runs) made with the content pack in use now; otherwise it runs again in a new folder.
+    done = sorted(glob.glob(f'{OUT}/runs/*-{label}/config.json'))
+    if done and globals().get('PACK_ID'):
+        used = json.load(open(done[-1])).get('pack_id') or ''
+        if used and used != PACK_ID:
+            return False
     return progress(label) >= episodes
 
 
@@ -211,6 +217,10 @@ else:
         alfred('realism.build', '--refs', REFS, '--out', PACK_FILE, '--workers', 16)
     print(open(f'{REALISM}/main.build.md').read())
 os.environ['ALFRED_PACK'] = PACK_FILE  # every later cell (and background run) builds realistic worlds from it
+sys.path.insert(0, '/content/alfred')
+from alfred.realism.pack import load as load_pack
+PACK_ID = load_pack(PACK_FILE).id
+print('Content pack:', PACK_ID)
 if not os.path.exists(f'{REALISM}/check.md') or os.path.getmtime(f'{REALISM}/check.md') < os.path.getmtime(PACK_FILE):
     alfred('realism.check', '--pack', PACK_FILE, '--out', f'{REALISM}/check.md')
 print('Pack checked. Send alfred-results/realism/main.jsonl.gz and check.md for review before cell 4.')
