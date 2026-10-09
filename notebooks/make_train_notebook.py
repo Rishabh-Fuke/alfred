@@ -47,8 +47,8 @@ def secret(name):
         return None
 
 
-# Always start from the latest code.
-subprocess.run(['rm', '-rf', '/content/alfred'], check=True)
+# Always start from the latest code: from GitHub with the GITHUB_TOKEN secret, else the newest alfred*.zip on Drive.
+subprocess.run(['rm', '-rf', '/content/alfred', '/content/unzipped'], check=True)
 token = secret('GITHUB_TOKEN')
 if token:
     r = subprocess.run(['git', 'clone', '-q', '--depth', '1',
@@ -58,17 +58,28 @@ if token:
         raise RuntimeError('git clone failed: ' + r.stderr.replace(token, '***'))
     subprocess.run(['git', '-C', '/content/alfred', 'remote', 'set-url', 'origin',
                     'https://github.com/Rishabh-Fuke/alfred.git'], check=True)  # don't leave the token on disk
+    print(subprocess.run(['git', '-C', '/content/alfred', 'log', '--oneline', '-1'], capture_output=True,
+                         text=True).stdout)
 else:
-    src = next((p for p in ['/content/drive/MyDrive/alfred.zip', '/content/drive/MyDrive/alfred'] if os.path.exists(p)), None)
-    assert src, 'Add a GITHUB_TOKEN secret, or upload the repo to Drive as alfred.zip or a folder named alfred.'
-    if src.endswith('.zip'):
+    print('No GITHUB_TOKEN secret is visible to this notebook (add it and switch on "Notebook access"), '
+          'so using a copy of the code on Drive.')
+    zips = sorted(glob.glob('/content/drive/MyDrive/alfred*.zip'), key=os.path.getmtime)  # also "alfred (1).zip"
+    if zips:
+        src = zips[-1]
+        print(f'Using {src}, uploaded {time.ctime(os.path.getmtime(src))}')
         subprocess.run(['unzip', '-q', '-o', src, '-d', '/content/unzipped'], check=True)
-        root = os.path.dirname(glob.glob('/content/unzipped/**/pyproject.toml', recursive=True)[0])
+        found = glob.glob('/content/unzipped/**/alfred/train/grpo.py', recursive=True)
+        assert found, f'{src} does not contain the Alfred code.'
+        root = os.path.dirname(os.path.dirname(os.path.dirname(found[0])))
+    elif os.path.isdir('/content/drive/MyDrive/alfred'):
+        root = '/content/drive/MyDrive/alfred'
+        print(f'Using the folder {root}')
     else:
-        root = src
+        raise RuntimeError('Add a GITHUB_TOKEN secret, or upload the code to My Drive as alfred.zip.')
     shutil.copytree(root, '/content/alfred')
-assert os.path.exists('/content/alfred/alfred/train/grpo.py'), 'This copy of the code is out of date.'
-print(subprocess.run(['git', '-C', '/content/alfred', 'log', '--oneline', '-1'], capture_output=True, text=True).stdout)
+assert os.path.exists('/content/alfred/alfred/realism/build.py'), (
+    'This copy of the code is out of date. Upload the latest alfred.zip to My Drive (or delete the old "alfred" '
+    'folder there), then run this cell again.')
 
 # vLLM first (it pins torch and transformers), then the training extras on top of those versions.
 subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '-U', 'vllm'], check=True)
