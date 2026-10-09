@@ -10,16 +10,17 @@ Teaches NVIDIA's Nemotron 3 Nano 4B to ask when a request is ambiguous, say "I c
 
 | Cell | What | Time | Cost |
 |---|---|---|---|
-| 3 | Start the teacher episodes in the background (Nemotron 3 Nano 30B on Token Factory; no GPU needed) | ~1 h, in the background | ~$5 of credits |
-| 4 | Meanwhile, a smoke test on the GPU: 2 training steps, load that adapter into vLLM, one RL step. Catches setup problems in minutes, not hours | ~15 min | |
-| 5 | Baselines for the untrained 4B model in native tool-calling mode, and on the new held-out task types | ~40 min | <$1 |
-| 6 | Wait for the teacher, then build the training set | | |
-| 7 | Supervised fine-tuning (LoRA) | ~1-3 h | |
-| 8 | Evaluate the fine-tuned model | ~30 min | |
-| 9 | Reinforcement learning (GRPO) against the environment | ~3-6 h | |
-| 10 | Final evaluation, including outside benchmarks | ~2 h | |
-| 11 | Package results to send back | 1 min | |
-| 12 | Export for laptops: merge the adapter, convert to a 4-bit GGUF, check it still works, publish it (optional) | ~40 min | |
+| 3 | Realistic worlds: sample style references from the Enron corpus, have Nemotron 3 Super write the content pack, check it. **Then send `alfred-results/realism/main.jsonl.gz` and `check.md` for review before going on.** | ~1 h | ~$3-5 of credits |
+| 4 | Start the teacher episodes in the background (Nemotron 3 Nano 30B on Token Factory; base and realistic worlds; no GPU needed) | ~1.5 h, in the background | ~$7 of credits |
+| 5 | Meanwhile, a smoke test on the GPU: 2 training steps, load that adapter into vLLM, one RL step. Catches setup problems in minutes, not hours | ~15 min | |
+| 6 | Baselines for the untrained 4B model, base and realistic worlds, trained and held-out task types | ~1 h | <$1 |
+| 7 | Wait for the teacher, then build the training set | | |
+| 8 | Supervised fine-tuning (LoRA) | ~1-3 h | |
+| 9 | Evaluate the fine-tuned model | ~45 min | |
+| 10 | Reinforcement learning (GRPO) against the environment | ~3-6 h | |
+| 11 | Final evaluation, including outside benchmarks | ~2.5 h | |
+| 12 | Package results to send back | 1 min | |
+| 13 | Export for laptops: merge the adapter, convert to a 4-bit GGUF, check it still works, publish it (optional) | ~40 min | |
 
 **Secrets** (key icon in the left sidebar; turn on notebook access for each):
 - `NEBIUS_API_KEY`: your Token Factory key.
@@ -121,9 +122,14 @@ def finished(label, episodes):
     return progress(label) >= episodes
 
 
+def running(label):
+    # Is a background run with exactly this label alive? ("teacher-x" must not match "teacher-x-real".)
+    return subprocess.run(['pgrep', '-f', f'{label}( |$)'], capture_output=True).returncode == 0
+
+
 def background(label, *args):
     # Starts `python -m alfred.<args>` in the background (for runs that only call Token Factory) and returns.
-    if subprocess.run(['pgrep', '-f', label], capture_output=True).returncode == 0:
+    if running(label):
         print(f'{label} is already running')
         return
     subprocess.Popen([sys.executable, '-m', f'alfred.{args[0]}', *map(str, args[1:])], cwd='/content/alfred',
@@ -134,7 +140,7 @@ def background(label, *args):
 
 def wait_for(label, episodes):
     while not finished(label, episodes):
-        if subprocess.run(['pgrep', '-f', label], capture_output=True).returncode != 0:
+        if not running(label):
             time.sleep(5)
             if finished(label, episodes):
                 break
@@ -161,6 +167,7 @@ def stop_serving():
 
 
 alfred('eval', '--agent', 'oracle', '--worlds', 1, '--out', '/content/oracle-check')
+REAL = ['--style', 'realistic']  # add to an eval for realistic worlds (text from the content pack, cell 3)
 """
 
 KEYS = r"""# 2. Token Factory key, from the NEBIUS_API_KEY secret
@@ -173,35 +180,64 @@ tf = OpenAI(base_url='https://api.tokenfactory.nebius.com/v1/', api_key=os.envir
 print('Token Factory OK:', sorted(m.id for m in tf.models.list() if 'nemotron' in m.id.lower()))
 """
 
-TEACHER = r"""# 3. Start the teacher episodes in the background (about 1 hour, roughly $5 of Token Factory credits)
-# Nemotron 3 Nano 30B scored 95% clean on the baseline, as well as Super, at a fifth of the price. Worlds 0-219,
-# all 9 training task types, one episode each. Only clean successes become training data (cell 6). This runs on
-# Token Factory, so the GPU is free for the next cells meanwhile.
-TEACHER = 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'
-TEACHER_WORLDS = 220
-if not finished('teacher-nano30b', TEACHER_WORLDS * 9):
-    background('teacher-nano30b', 'eval', '--models', TEACHER, '--base-url', 'tokenfactory', '--world-start', 0,
-               '--worlds', TEACHER_WORLDS, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 12,
-               *resume('teacher-nano30b'))
-# The bigger Nemotron models on the held-out task types, for reference (well under $1).
-for m in ['nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B', 'nvidia/nemotron-3-super-120b-a12b']:
-    label = 'tf-heldout-' + m.split('/')[-1].lower()
-    if not finished(label, 7 * EPISODES):
-        background(label, 'eval', '--models', m, '--base-url', 'tokenfactory', '--templates', 'heldout',
-                   '--worlds', 5, '--samples', 3, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 4,
-                   *resume(label))
+PACK = r"""# 3. Realistic worlds: build the content pack (about 1 hour, roughly $3-5 of Token Factory credits)
+# Real inboxes are messy, so the training worlds should be too. This samples real emails from the Enron corpus as
+# style references (they stay on your Drive and never enter the repo), has Nemotron 3 Super write ~2,000 templates
+# in that style (every fact is a slot the world fills, so answers stay verifiable), and checks every one in code.
+# Resumes after a disconnect. Once a reviewed pack is committed to the repo, this cell just uses that.
+REALISM = f'{OUT}/realism'
+os.makedirs(REALISM, exist_ok=True)
+REFS, PACK_FILE = f'{REALISM}/enron_refs.jsonl.gz', f'{REALISM}/main.jsonl.gz'
+committed = '/content/alfred/alfred/realism/packs/main.jsonl.gz'
+if os.path.exists(committed):
+    PACK_FILE = committed
+    print('Using the reviewed pack from the repo.')
+else:
+    if not os.path.exists(REFS):
+        alfred('realism.enron', '--download', '/content/enron')
+        alfred('realism.enron', '--tar', '/content/enron/enron_mail_20150507.tar.gz', '--out', REFS)
+    if not os.path.exists(PACK_FILE):
+        alfred('realism.build', '--refs', REFS, '--out', PACK_FILE, '--workers', 16)
+    print(open(f'{REALISM}/main.build.md').read())
+os.environ['ALFRED_PACK'] = PACK_FILE  # every later cell (and background run) builds realistic worlds from it
+if not os.path.exists(f'{REALISM}/check.md') or os.path.getmtime(f'{REALISM}/check.md') < os.path.getmtime(PACK_FILE):
+    alfred('realism.check', '--pack', PACK_FILE, '--out', f'{REALISM}/check.md')
+print('Pack checked. Send alfred-results/realism/main.jsonl.gz and check.md for review before cell 4.')
 """
 
-DATA = r"""# 6. Wait for the teacher, then build the training set (about 1 minute once it's done)
-# The teacher's clean successes, at most one per task, topped up with scripted episodes (worlds 300-549) so every
-# task type has the same count. Validation tasks are held out by task, not by episode.
-wait_for('teacher-nano30b', TEACHER_WORLDS * 9)
+TEACHER = r"""# 4. Start the teacher episodes in the background (about 1.5 hours, roughly $7 of Token Factory credits)
+# Nemotron 3 Nano 30B scored 95% clean on the baseline, as well as Super, at a fifth of the price. All 9 training
+# task types, one episode each: base worlds 0-89 and realistic worlds 90-249 (most training is on realistic
+# worlds). Only clean successes become training data (cell 7). This runs on Token Factory, so the GPU is free.
+TEACHER = 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'
+TEACHER_RUNS = {'teacher-nano30b': (0, 90, []), 'teacher-nano30b-real': (90, 160, REAL)}
+for label, (start, n, style) in TEACHER_RUNS.items():
+    if not finished(label, n * 9):
+        background(label, 'eval', '--models', TEACHER, '--base-url', 'tokenfactory', '--world-start', start,
+                   '--worlds', n, *style, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 8,
+                   *resume(label))
+# The bigger Nemotron models on the held-out task types, for reference (about $1).
+for m in ['nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B', 'nvidia/nemotron-3-super-120b-a12b']:
+    for suffix, style in (('', []), ('-real', REAL)):
+        label = 'tf-heldout-' + m.split('/')[-1].lower() + suffix
+        if not finished(label, 7 * EPISODES):
+            background(label, 'eval', '--models', m, '--base-url', 'tokenfactory', '--templates', 'heldout', *style,
+                       '--worlds', 5, '--samples', 3, '--temperature', 0.6, '--max-tokens', 8192, '--workers', 4,
+                       *resume(label))
+"""
+
+DATA = r"""# 7. Wait for the teacher, then build the training set (about 2 minutes once it's done)
+# The teacher's clean successes, at most one per task, topped up with scripted episodes (worlds 300-549, 60% of
+# them realistic) so every task type has the same count. Validation tasks are held out by task, not by episode.
+for label, (start, n, style) in TEACHER_RUNS.items():
+    wait_for(label, n * 9)
 teacher_runs = sorted(d for d in glob.glob(f'{OUT}/runs/*-teacher-*') if os.path.exists(f'{d}/results.jsonl'))
 print('Teacher runs:', *teacher_runs, sep='\n  ')
-alfred('train.data', '--runs', *teacher_runs, '--oracle-worlds', '300-549', '--out', DATA_FILE)
+alfred('train.data', '--runs', *teacher_runs, '--oracle-worlds', '300-549', '--realistic-share', 0.6,
+       '--out', DATA_FILE)
 """
 
-BASELINE = r"""# 5. Baselines for the comparison (about 40 minutes)
+BASELINE = r"""# 6. Baselines for the comparison (about 1 hour)
 # The October baseline ran the 4B model with JSON tool calls, its better mode before training. Training uses
 # native tool calls (what vLLM, agent frameworks and the outside benchmarks use), so measure the untrained model
 # that way too, and on the held-out task types the model never trains on (both tool modes, to be fair to it).
@@ -214,21 +250,28 @@ if not finished('base-native-heldout', 7 * EPISODES):
 if not finished('base-json-heldout', 7 * EPISODES):
     alfred('eval', '--models', SERVED, *JSON_MODE, '--templates', 'heldout', '--worlds', 5, '--samples', 3,
            *resume('base-json-heldout'))
+# The same in realistic worlds (lived-in inbox and calendar, wording the model never trains on).
+if not finished('base-native-real', 9 * EPISODES):
+    alfred('eval', '--models', SERVED, *NATIVE, *REAL, '--worlds', 5, '--samples', 3, *resume('base-native-real'))
+if not finished('base-native-heldout-real', 7 * EPISODES):
+    alfred('eval', '--models', SERVED, *NATIVE, *REAL, '--templates', 'heldout', '--worlds', 5, '--samples', 3,
+           *resume('base-native-heldout-real'))
 alfred('report', *runs('main-nemotron4b-nothink', 'base-native'), '--out', f'{TRAIN}/report-base.md')
+alfred('report', *runs('base-native', 'base-native-real'), '--out', f'{TRAIN}/report-base-realistic.md')
 """
 
-SMOKE = r"""# 4. Smoke test of the training stack while the teacher runs (about 15 minutes)
+SMOKE = r"""# 5. Smoke test of the training stack while the teacher runs (about 15 minutes)
 # Two SFT steps on 8 scripted conversations, load that adapter into vLLM and play one task with it, then one tiny
 # GRPO step. If anything in the setup is wrong (model loading, Mamba kernels, LoRA in vLLM, GPU memory while both
 # run), it shows up here instead of hours into training.
 SMOKE = '/content/smoke'
 if not os.path.exists(f'{SMOKE}/done'):
     stop_serving()
-    alfred('train.data', '--oracle-worlds', '600-601', '--out', f'{SMOKE}/data.jsonl')
+    alfred('train.data', '--oracle-worlds', '600-601', '--realistic-share', 0.5, '--out', f'{SMOKE}/data.jsonl')
     alfred('train.sft', '--model', MODEL, '--data', f'{SMOKE}/data.jsonl', '--out', f'{SMOKE}/sft', '--limit', 8,
            '--batch', 4, '--epochs', 1, '--eval-every', 1000, '--save-every', 1000)
     serve(f'alfred-smoke={SMOKE}/sft/adapter', gpu=0.42)
-    alfred('eval', '--models', 'alfred-smoke', *NATIVE, '--worlds', 1, '--templates', 'event_time_lookup',
+    alfred('eval', '--models', 'alfred-smoke', *NATIVE, *REAL, '--worlds', 1, '--templates', 'event_time_lookup',
            '--out', f'{SMOKE}/eval')
     alfred('train.grpo', '--model', MODEL, '--init-adapter', f'{SMOKE}/sft/adapter', '--out', f'{SMOKE}/grpo',
            '--steps', 1, '--tasks', 2, '--group', 4, '--val-every', 1000, '--val-worlds', 1)
@@ -236,7 +279,7 @@ if not os.path.exists(f'{SMOKE}/done'):
 print('Smoke test passed.')
 """
 
-SFT = r"""# 7. Supervised fine-tuning with LoRA (about 1-3 hours; resumes after a disconnect)
+SFT = r"""# 8. Supervised fine-tuning with LoRA (about 1-3 hours; resumes after a disconnect)
 # One conversation per forward pass, 16 per optimizer step, loss only on the assistant's turns.
 stop_serving()  # training needs the GPU memory
 if not os.path.exists(f'{SFT_DIR}/adapter/adapter_model.safetensors'):
@@ -245,22 +288,30 @@ if not os.path.exists(f'{SFT_DIR}/adapter/adapter_model.safetensors'):
 print(open(f'{SFT_DIR}/log.jsonl').read().splitlines()[-1])
 """
 
-EVAL_SFT = r"""# 8. Evaluate the fine-tuned model on the same tasks (about 30 minutes)
+EVAL_SFT = r"""# 9. Evaluate the fine-tuned model on the same tasks (about 45 minutes)
 serve(f'alfred-sft={SFT_DIR}/adapter')
 if not finished('sft-native', 9 * EPISODES):
     alfred('eval', '--models', 'alfred-sft', *NATIVE, '--worlds', 5, '--samples', 3, *resume('sft-native'))
 if not finished('sft-native-heldout', 7 * EPISODES):
     alfred('eval', '--models', 'alfred-sft', *NATIVE, '--templates', 'heldout', '--worlds', 5, '--samples', 3,
            *resume('sft-native-heldout'))
+for label, style in (('sft-native-real', REAL),):
+    if not finished(label, 9 * EPISODES):
+        alfred('eval', '--models', 'alfred-sft', *NATIVE, *style, '--worlds', 5, '--samples', 3, *resume(label))
+if not finished('sft-native-heldout-real', 7 * EPISODES):
+    alfred('eval', '--models', 'alfred-sft', *NATIVE, *REAL, '--templates', 'heldout', '--worlds', 5, '--samples', 3,
+           *resume('sft-native-heldout-real'))
 alfred('report', *runs('base-native', 'main-nemotron4b-nothink', 'sft-native'), '--out', f'{TRAIN}/report-sft.md')
+alfred('report', *runs('base-native-real', 'sft-native-real'), '--out', f'{TRAIN}/report-sft-realistic.md')
 alfred('report', *runs('base-native-heldout', 'base-json-heldout', 'sft-native-heldout'),
        '--out', f'{TRAIN}/report-sft-heldout.md')
 """
 
-GRPO = r"""# 9. Reinforcement learning (GRPO) against the environment (about 3-6 hours; resumes after a disconnect)
+GRPO = r"""# 10. Reinforcement learning (GRPO) against the environment (about 3-6 hours; resumes after a disconnect)
 # vLLM plays the episodes with the current policy while the trainer shares the GPU, so vLLM gets less memory here.
-# Every step: 8 training tasks x 8 attempts, rewards from the environment's checks, one policy-gradient step,
-# and the new adapter goes straight into vLLM. Validation on worlds 950-955 every 10 steps; the best is kept.
+# Every step: 8 training tasks x 8 attempts (70% in realistic worlds), rewards from the environment's checks, one
+# policy-gradient step, and the new adapter goes straight into vLLM. Validation on worlds 950-955 every 10 steps,
+# in the same mix; the best is kept.
 STEPS = 60
 if not os.path.exists(f'{GRPO_DIR}/final/adapter_model.safetensors'):
     serve(gpu=0.42)
@@ -273,15 +324,24 @@ for line in open(f'{GRPO_DIR}/log.jsonl').read().splitlines()[-3:]:
 alfred('train.audit', GRPO_DIR, '--out', f'{GRPO_DIR}/audit.md')
 """
 
-EVAL_FINAL = r"""# 10. Final evaluation: Alfred tasks, held-out task types, and the outside benchmarks (about 2 hours)
+EVAL_FINAL = r"""# 11. Final evaluation: Alfred tasks, held-out task types, and the outside benchmarks (about 2.5 hours)
 serve(f'alfred-sft={SFT_DIR}/adapter', f'alfred-rl={GRPO_DIR}/best')
 if not finished('rl-native', 9 * EPISODES):
     alfred('eval', '--models', 'alfred-rl', *NATIVE, '--worlds', 5, '--samples', 3, *resume('rl-native'))
 if not finished('rl-native-heldout', 7 * EPISODES):
     alfred('eval', '--models', 'alfred-rl', *NATIVE, '--templates', 'heldout', '--worlds', 5, '--samples', 3,
            *resume('rl-native-heldout'))
+if not finished('rl-native-real', 9 * EPISODES):
+    alfred('eval', '--models', 'alfred-rl', *NATIVE, *REAL, '--worlds', 5, '--samples', 3, *resume('rl-native-real'))
+if not finished('rl-native-heldout-real', 7 * EPISODES):
+    alfred('eval', '--models', 'alfred-rl', *NATIVE, *REAL, '--templates', 'heldout', '--worlds', 5, '--samples', 3,
+           *resume('rl-native-heldout-real'))
 alfred('report', *runs('base-native', 'main-nemotron4b-nothink', 'sft-native', 'rl-native'),
        '--out', f'{TRAIN}/report-final.md')
+alfred('report', *runs('base-native-real', 'sft-native-real', 'rl-native-real'),
+       '--out', f'{TRAIN}/report-final-realistic.md')
+alfred('report', *runs('base-native-heldout-real', 'sft-native-heldout-real', 'rl-native-heldout-real'),
+       '--out', f'{TRAIN}/report-final-heldout-realistic.md')
 alfred('report', *runs('base-native-heldout', 'base-json-heldout', 'sft-native-heldout', 'rl-native-heldout'),
        '--out', f'{TRAIN}/report-final-heldout.md')
 
@@ -309,13 +369,13 @@ external('summary', EXT, '--out', f'{EXT}/report.md')
 print(open(f'{EXT}/report.md').read())
 """
 
-PACKAGE = r"""# 11. Package everything to send back (about 1 minute)
+PACKAGE = r"""# 12. Package everything to send back (about 1 minute)
 # Logs, reports, data stats, validation curves and episodes, and every eval run's trajectories. Adapters and
 # the training data itself stay on Drive.
 os.chdir(OUT)
 patterns = ['train/*.md', 'train/data/*.md', 'train/sft/log.jsonl', 'train/sft/args.json', 'train/grpo/log.jsonl',
             'train/grpo/args.json', 'train/grpo/val/*', 'train/grpo/episodes/*', 'train/grpo/best/val.json',
-            'train/grpo/audit.md',
+            'train/grpo/audit.md', 'realism/main.jsonl.gz', 'realism/main.build.md', 'realism/check.md',
             'external/report.md', 'external/*/summary.*']
 files = [f for p in patterns for f in glob.glob(p)]
 new_runs = [d for d in glob.glob('runs/*') if any(k in d for k in ('-base-', '-sft-', '-rl-', '-tf-heldout-'))]
@@ -327,7 +387,7 @@ print(f'Download alfred-results/train-results.zip from your Drive ({os.path.gets
 """
 
 
-EXPORT = r"""# 12. Export for laptops (about 40 minutes): merge, convert to GGUF, quantize to 4 bits, check, publish
+EXPORT = r"""# 13. Export for laptops (about 40 minutes): merge, convert to GGUF, quantize to 4 bits, check, publish
 # The merged model goes to Drive; the 4-bit GGUF is what Ollama and llama.cpp run on a laptop. The check plays the
 # 45 Alfred tasks once with the 4-bit model under llama.cpp, so "it still works after quantization" is measured.
 FINAL = f'{TRAIN}/alfred-nemotron-3-nano-4b'
@@ -394,7 +454,7 @@ def cell(source: str, kind: str = "code") -> dict:
 
 
 def main():
-    nb = {"cells": [cell(INTRO, "markdown"), cell(SETUP), cell(KEYS), cell(TEACHER), cell(SMOKE), cell(BASELINE),
+    nb = {"cells": [cell(INTRO, "markdown"), cell(SETUP), cell(KEYS), cell(PACK), cell(TEACHER), cell(SMOKE), cell(BASELINE),
                     cell(DATA), cell(SFT), cell(EVAL_SFT), cell(GRPO), cell(EVAL_FINAL), cell(PACKAGE),
                     cell(EXPORT)],
           "metadata": {"accelerator": "GPU", "colab": {"gpuType": "A100", "provenance": []},
