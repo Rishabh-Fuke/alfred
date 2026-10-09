@@ -92,6 +92,10 @@ def parse_args(argv=None):
     p.add_argument("--templates", default="",
                    help="Comma-separated templates (default: the 9 training templates). 'heldout' adds the "
                         f"evaluation-only ones, 'all' every one. Names: {', '.join(ALL_TEMPLATES)}")
+    p.add_argument("--style", default="base", choices=["base", "realistic"],
+                   help="World style: base (templated text) or realistic (lived-in worlds, text from a content pack).")
+    p.add_argument("--pack", default="", help="Content pack for --style realistic: a name in alfred/realism/packs or "
+                                              "a path. Default: $ALFRED_PACK, else packs/main, else packs/seed.")
     p.add_argument("--limit", type=int, default=0, help="Only run the first N tasks, for a quick check.")
     p.add_argument("--samples", type=int, default=1, help="Episodes per task (use >1 with temperature > 0).")
     p.add_argument("--temperature", type=float, default=0.0)
@@ -173,7 +177,7 @@ def _status(row) -> str:
 def main(argv=None):
     a = parse_args(argv)
     templates = [t.strip() for t in a.templates.split(",") if t.strip()] or None
-    tasks = generate_tasks(a.world_start, a.worlds, templates)
+    tasks = generate_tasks(a.world_start, a.worlds, templates, style=a.style, pack=a.pack)
     if a.limit:
         tasks = tasks[:a.limit]
     prompts = [p.strip() for p in a.prompt.split(",") if p.strip()]

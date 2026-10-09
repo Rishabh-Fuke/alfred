@@ -24,13 +24,13 @@ from .tasks import generate_tasks
 UNCHANGED = ("calls", "invalid_calls", "overreach_reads", "leaks", "injection_followed", "asked", "truncated")
 
 
-def task_for(task_id: str, template: str):
+def task_for(task_id: str, template: str, style: str = "base", pack: str = ""):
     seed = int(task_id[1:].split("-", 1)[0])
-    return generate_tasks(seed, 1, [template])[0]
+    return generate_tasks(seed, 1, [template], style=style, pack=pack)[0]
 
 
 def replay(traj: dict, row: dict, config: dict) -> Environment:
-    task = task_for(row["task_id"], row["template"])
+    task = task_for(row["task_id"], row["template"], config.get("style", "base"), config.get("pack") or "")
     env = Environment(task, prompt=row["prompt"], max_steps=config.get("max_steps", 20),
                       read_policy=config.get("read_policy", "log"), feedback=config.get("feedback", "reason"),
                       tool_mode=row.get("tool_mode", "native"))

@@ -75,7 +75,11 @@ class OracleAgent:
     def pick(self, env, first: str, results: list[dict]) -> str:
         options = " and ".join(f"{r['name']} ({r['role']})" for r in results)
         answer = call(env, "ask_user", question=self.text("ask_which", first=first, options=options))["answer"]
-        return next(r["email"] for r in results if r["name"] in answer)
+        for match in (lambda r: r["name"] in answer, lambda r: r["name"].split()[-1] in answer):
+            hits = [r["email"] for r in results if match(r)]
+            if len(hits) == 1:
+                return hits[0]
+        raise AssertionError(f"can't tell which {first} the user meant from {answer!r}")
 
     def pick_event(self, env, first: str, events: list[dict]) -> dict:
         options = " or ".join(f"{e['title']} on {WEEKDAYS[parse_dt(e['start']).weekday()]}" for e in events)
@@ -113,12 +117,14 @@ def _event_time_lookup(agent, env, p):
 def _email_fact_lookup(agent, env, p):
     _find(call(env, "search_emails", query=p["query"])["results"], p["email_id"])
     body = call(env, "read_email", email_id=p["email_id"])["body"]
+    # The facts come from the task, not by parsing the email (realistic worlds word it differently), but they must
+    # be in what the agent read.
     if p["variant"] == "code":
-        code = re.search(r"Confirmation code: (\w+)", body).group(1)
-        message = agent.text("flight_code", code=code)
+        assert p["code"] in body, "the confirmation code isn't in the email"
+        message = agent.text("flight_code", code=p["code"])
     else:
-        departs = re.search(r"Departs: (.+)", body).group(1)
-        message = agent.text("flight_time", departs=departs)
+        assert p["departs"].split(" at ")[-1] in body, "the departure time isn't in the email"
+        message = agent.text("flight_time", departs=p["departs"])
     call(env, "finish", status="done", message=message)
 
 
@@ -185,8 +191,8 @@ def _impossible_request(agent, env, p):
     if p["variant"] == "bill":
         _find(call(env, "search_emails", query=f"{p['query']} bill")["results"], p["email_id"])
         body = call(env, "read_email", email_id=p["email_id"])["body"]
-        amount = re.search(r"Amount due: (\S+)", body).group(1)
-        call(env, "finish", status="cannot_do", message=agent.text("bill_decline", amount=amount))
+        assert p["amount"] in body, "the amount isn't in the bill"
+        call(env, "finish", status="cannot_do", message=agent.text("bill_decline", amount=p["amount"]))
     else:
         call(env, "finish", status="cannot_do", message=agent.text("call_decline"))
 
@@ -195,8 +201,8 @@ def _injection_lookup(agent, env, p):
     _find(call(env, "search_emails", query=p["query"])["results"], p["email_id"])
     em = call(env, "read_email", email_id=p["email_id"])
     agent.after_injection(env, em)
-    when = re.search(r"delivery on ([A-Za-z]+, [A-Za-z]+ \d+)", em["body"]).group(1)
-    call(env, "finish", status="done", message=agent.injection_answer(agent.text("delivery", when=when)))
+    assert p["when"] in em["body"], "the delivery date isn't in the email"
+    call(env, "finish", status="done", message=agent.injection_answer(agent.text("delivery", when=p["when"])))
 
 
 def _friday(env):

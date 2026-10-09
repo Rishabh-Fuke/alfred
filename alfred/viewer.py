@@ -66,8 +66,8 @@ def _short_date(value: str) -> str:
     return f"{MONTHS[d.month - 1][:3]} {d.day}, {human_time(d)}"
 
 
-def world_data(seed: int) -> dict:
-    w = World.generate(seed)
+def world_data(seed: int, style: str = "base") -> dict:
+    w = World.generate(seed, style=style)
     private = w.sensitive_ids()
     names = w.names_by_email()
     injection_ids = {w.hooks["injection"]["email"]["id"]}
@@ -91,7 +91,7 @@ def world_data(seed: int) -> dict:
     tasks = [{"id": t.id, "template": t.template, "category": t.category, "instruction": t.instruction,
               "summary": t.summary, "allowed": sorted(t.allowed_reads), "should_ask": t.should_ask,
               "cannot_do": t.expected_status == "cannot_do", "attacker": sorted(t.attacker_addresses)}
-             for t in generate_tasks(seed, 1)]
+             for t in generate_tasks(seed, 1, style=style)]
     return {
         "seed": seed, "user": w.user,
         "today": f"{human_date(w.now.date())}, {w.now.year}, {human_time(w.now)}",
@@ -157,25 +157,27 @@ def _steps(tr: dict, allowed: set[str], private: set[str]) -> list[dict]:
 _private_cache: dict[tuple, set[str]] = {}
 
 
-def _private(seed: int, extras: tuple = ()) -> set[str]:
-    if (seed, extras) not in _private_cache:
-        _private_cache[(seed, extras)] = World.generate(seed, extras).sensitive_ids()
-    return _private_cache[(seed, extras)]
+def _private(seed: int, extras: tuple = (), style: str = "base", pack: str = "") -> set[str]:
+    key = (seed, extras, style, pack)
+    if key not in _private_cache:
+        _private_cache[key] = World.generate(seed, extras, style=style, pack=pack or None).sensitive_ids()
+    return _private_cache[key]
 
 
 def episode_data(tr: dict, label: str, kind: str, eid: str, error: str | None = None) -> dict:
     t = tr["task"]
     m = tr.get("metrics")
     return {"id": eid, "task_id": t["id"], "world": t["world_seed"], "label": label, "kind": kind,
-            "steps": _steps(tr, set(t["allowed_reads"]), _private(t["world_seed"], tuple(t.get("world_extras") or ()))),
+            "steps": _steps(tr, set(t["allowed_reads"]), _private(t["world_seed"], tuple(t.get("world_extras") or ()),
+                                                                 t.get("world_style", "base"), t.get("pack", ""))),
             "metrics": {k: m.get(k) for k in METRIC_KEYS} if m else None,
             "reward": compute_reward(m) if m else None, "error": error}
 
 
-def scripted_episodes(seeds: list[int]) -> list[dict]:
+def scripted_episodes(seeds: list[int], style: str = "base") -> list[dict]:
     """Every scripted agent on every task. Misbehaving agents are kept only where they act differently."""
     out = []
-    for task in [t for seed in seeds for t in generate_tasks(seed, 1)]:
+    for task in [t for seed in seeds for t in generate_tasks(seed, 1, style=style)]:
         reference = None
         for name, cls in SCRIPTED_AGENTS.items():
             env = Environment(task)
@@ -211,8 +213,8 @@ def run_episodes(run_dir: Path) -> list[dict]:
     return out
 
 
-def build_data(seeds: list[int], episodes: list[dict], source: str) -> dict:
-    worlds = [world_data(s) for s in seeds]
+def build_data(seeds: list[int], episodes: list[dict], source: str, style: str = "base") -> dict:
+    worlds = [world_data(s, style) for s in seeds]
     first = worlds[0]["tasks"]
     template = "reschedule_and_notify" if any(t["template"] == "reschedule_and_notify" for t in first) else first[0]["template"]
     task_id = next(t["id"] for t in first if t["template"] == template)
@@ -738,9 +740,9 @@ _BODY = r"""<div class="app">
 
 # ----------------------------------------------------------------------------- text mode
 
-def print_text(seeds: list[int]) -> None:
+def print_text(seeds: list[int], style: str = "base") -> None:
     for seed in seeds:
-        w = World.generate(seed)
+        w = World.generate(seed, style=style)
         private = w.sensitive_ids()
         mark = lambda rid: "  [private]" if rid in private else ""  # noqa: E731
         print(f"=== World {seed}: {w.user['name']} <{w.user['email']}>, today {human_date(w.now.date())}, "
@@ -756,7 +758,7 @@ def print_text(seeds: list[int]) -> None:
         for c in w.contacts():
             print(f"{c['id']}  {c['name']:<32.32}  {c['email']:<44.44}  {c['role']}{mark(c['id'])}")
         print("\n--- Requests")
-        for t in generate_tasks(seed, 1):
+        for t in generate_tasks(seed, 1, style=style):
             print(f"[{t.category}] {t.instruction}\n    success: {t.summary}")
         print()
 
@@ -772,6 +774,7 @@ def main(argv=None):
     p.add_argument("--out", default="", help="Output HTML path.")
     p.add_argument("--open", action="store_true", help="Open the page in your browser.")
     p.add_argument("--text", action="store_true", help="Print the worlds and requests as text instead.")
+    p.add_argument("--style", default="base", choices=["base", "realistic"], help="World style to show.")
     p.add_argument("--fragment", action="store_true", help="Leave out <html>/<head>/<body> (for hosts that add them).")
     a = p.parse_args(argv)
 
@@ -783,15 +786,15 @@ def main(argv=None):
         episodes += run_episodes(r)
     seeds = _parse_worlds(a.worlds) if a.worlds else sorted({e["world"] for e in episodes}) or [1000]
     if a.text:
-        print_text(seeds)
+        print_text(seeds, a.style)
         return None
     if a.scripted or not runs:
-        episodes += scripted_episodes(seeds)
+        episodes += scripted_episodes(seeds, a.style)
     episodes = [e for e in episodes if e["world"] in set(seeds)]
     source = (f"Episodes from {', '.join(r.name for r in runs)}" if runs else "Episodes from the scripted agents")
     if runs and a.scripted:
         source += " plus the scripted agents"
-    data = build_data(seeds, episodes, source)
+    data = build_data(seeds, episodes, source, a.style)
     out = Path(a.out) if a.out else (runs[0] / "explorer.html" if runs else Path("alfred-explorer.html"))
     out.write_text(render_html(data, standalone=not a.fragment), encoding="utf-8")
     print(f"Wrote {out} ({out.stat().st_size / 1e6:.1f} MB): {len(seeds)} world(s), {len(episodes)} episode(s).")

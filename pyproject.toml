@@ -22,6 +22,7 @@ include = ["alfred*"]
 
 [tool.setuptools.package-data]
 "alfred.app" = ["static/*.html", "static/fonts/*"]
+"alfred.realism" = ["packs/*.jsonl", "packs/*.jsonl.gz"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

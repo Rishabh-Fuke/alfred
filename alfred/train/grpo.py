@@ -50,11 +50,21 @@ from .render import TemplateMismatch, render
 from .rollout import Episode, make_client, play_many
 
 
+def validation_tasks(n_worlds: int, realistic_share: float, pack: str = "") -> list:
+    """Validation in the same mix as training: the first worlds base, the rest realistic (with eval-split text)."""
+    n_real = round(n_worlds * realistic_share)
+    start = VALIDATION_WORLDS.start
+    return (generate_tasks(start, n_worlds - n_real) if n_worlds - n_real else []) + \
+        (generate_tasks(start + n_worlds - n_real, n_real, style="realistic", pack=pack) if n_real else [])
+
+
 class TaskSampler:
     """Draws training tasks, favoring templates the policy solves only sometimes."""
 
-    def __init__(self, templates: list[str], worlds: range, seed: int = 0, floor: float = 0.1):
+    def __init__(self, templates: list[str], worlds: range, seed: int = 0, floor: float = 0.1,
+                 realistic_share: float = 0.0, pack: str = ""):
         self.templates, self.worlds, self.floor = list(templates), worlds, floor
+        self.realistic_share, self.pack = realistic_share, pack
         self.rng = random.Random(seed)
         self.solve_rate = {t: 0.5 for t in self.templates}
 
@@ -71,7 +81,8 @@ class TaskSampler:
                 if (seed, tpl) not in seen:
                     seen.add((seed, tpl))
                     break
-            tasks.append(generate_tasks(seed, 1, [tpl])[0])
+            style = "realistic" if self.rng.random() < self.realistic_share else "base"
+            tasks.append(generate_tasks(seed, 1, [tpl], style=style, pack=self.pack)[0])
         return tasks
 
     def update(self, template: str, solve_rate: float, momentum: float = 0.7) -> None:
@@ -183,6 +194,10 @@ def parse_args(argv=None):
     p.add_argument("--templates", default=",".join(TEMPLATES))
     p.add_argument("--train-worlds", default=f"{TRAIN_WORLDS.start}-{TRAIN_WORLDS.stop - 1}",
                    help="Range of training worlds to sample tasks from (inside 0-949).")
+    p.add_argument("--realistic-share", type=float, default=0.7,
+                   help="Share of training tasks in realistic worlds (the rest use base worlds).")
+    p.add_argument("--pack", default="", help="Content pack for realistic worlds (default: $ALFRED_PACK, packs/main, "
+                                              "packs/seed).")
     p.add_argument("--temperature", type=float, default=0.9)
     p.add_argument("--top-p", type=float, default=1.0)
     p.add_argument("--max-steps", type=int, default=12, help="Model turns per episode.")
@@ -226,9 +241,9 @@ class Trainer:
         templates = [t.strip() for t in a.templates.split(",") if t.strip()]
         if set(templates) & set(HELDOUT_TEMPLATES):
             raise ValueError("held-out templates are for evaluation only")
-        self.sampler = TaskSampler(templates, worlds, a.seed)
+        self.sampler = TaskSampler(templates, worlds, a.seed, realistic_share=a.realistic_share, pack=a.pack)
         self.step, self.best_val, self.policy = 0, None, None
-        self.val_tasks = generate_tasks(VALIDATION_WORLDS.start, a.val_worlds)
+        self.val_tasks = validation_tasks(a.val_worlds, a.realistic_share, a.pack)
 
     # --- serving the policy -------------------------------------------------------------------------------------
 

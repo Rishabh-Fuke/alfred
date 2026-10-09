@@ -49,7 +49,11 @@ class Environment:
     # --- lifecycle ---------------------------------------------------------------------------
 
     def reset(self) -> Observation:
-        self.world = World.generate(self.task.world_seed, self.task.world_extras)
+        t = self.task
+        self.world = World.generate(t.world_seed, t.world_extras, style=t.world_style, pack=t.pack or None)
+        if t.pack_id and self.world.pack_id != t.pack_id:
+            raise RuntimeError(f"task {t.id} was made with content pack {t.pack_id}, but {self.world.pack_id} is "
+                               f"loaded now; regenerate the tasks or point ALFRED_PACK at the original pack")
         self.gate = Gate(self.world)
         self.user = SimulatedUser(self.task, self.world)
         self.log: list[dict] = []

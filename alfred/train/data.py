@@ -149,6 +149,7 @@ def conversation_from_env(env) -> list[dict]:
 def example(source: str, task: dict, messages: list[dict], metrics: dict, sample: int = 0) -> dict:
     return {"id": f"{source}:{task['id']}:s{sample}", "source": source, "task_id": task["id"],
             "template": task["template"], "category": task["category"], "world_seed": task["world_seed"],
+            "world_style": task.get("world_style", "base"),
             "messages": messages, "train": train_flags(messages), "tools": TOOL_SCHEMAS,
             "metrics": {k: metrics.get(k) for k in ("clean_success", "calls", "first_try_approval", "asked")}}
 
@@ -182,10 +183,16 @@ def load_teacher(run_dirs: list[Path], max_per_task: int = 1) -> tuple[list[dict
     return out, why
 
 
-def oracle_examples(worlds: range, templates: list[str], prompt: str = "plain") -> list[dict]:
+def oracle_examples(worlds: range, templates: list[str], prompt: str = "plain", realistic_share: float = 0.0,
+                    pack: str = "") -> list[dict]:
+    """Scripted episodes. realistic_share of the worlds (the last ones in the range) are realistic."""
     _check_templates(templates)
     out = []
-    for task in generate_tasks(worlds.start, len(worlds), templates):
+    n_real = round(len(worlds) * realistic_share)
+    split = worlds.start + len(worlds) - n_real
+    tasks = generate_tasks(worlds.start, split - worlds.start, templates) if split > worlds.start else []
+    tasks += generate_tasks(split, n_real, templates, style="realistic", pack=pack) if n_real else []
+    for task in tasks:
         if task.world_seed not in TRAIN_WORLDS:
             raise ValueError(f"world {task.world_seed} isn't a training world")
         env = Environment(task, prompt=prompt, tool_mode="native")
@@ -257,6 +264,9 @@ def main(argv=None):
     p.add_argument("--max-per-task", type=int, default=1, help="Teacher episodes kept per task.")
     p.add_argument("--oracle-worlds", default="", help="Training worlds for scripted episodes, e.g. 200-449.")
     p.add_argument("--templates", default=",".join(TRAINING_TEMPLATES))
+    p.add_argument("--realistic-share", type=float, default=0.0,
+                   help="Share of the scripted worlds that are realistic (teacher episodes keep their own style).")
+    p.add_argument("--pack", default="", help="Content pack for realistic worlds.")
     p.add_argument("--per-template", type=int, default=0,
                    help="Examples per template (default: the largest teacher count).")
     p.add_argument("--oracle-min", type=float, default=0.15,
@@ -270,7 +280,8 @@ def main(argv=None):
     _check_templates(templates)
     teacher, why = load_teacher([Path(r) for r in a.runs], a.max_per_task)
     teacher = [ex for ex in teacher if ex["template"] in templates]
-    oracle = oracle_examples(_parse_world_range(a.oracle_worlds), templates) if a.oracle_worlds else []
+    oracle = (oracle_examples(_parse_world_range(a.oracle_worlds), templates, realistic_share=a.realistic_share,
+                              pack=a.pack) if a.oracle_worlds else [])
     examples = balance(teacher, oracle, a.per_template or None, a.oracle_min, a.seed)
     train, val = split_validation(examples, a.val_frac)
 
