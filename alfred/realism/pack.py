@@ -66,6 +66,11 @@ PLACEHOLDER = re.compile(r"\[[^\]\n]{1,40}\]|<[A-Za-z][^>\n]{0,40}>|\bX{3,}\b|\b
 CHATTER = re.compile(r"\A\s*(?:here(?:'s| is) (?:a|an|the|your) (?:new |rewritten |revised )?"
                      r"(?:email|message|version|draft|template|request)\b|sure[,!.]|certainly[,!.])|"
                      r"\bas an ai\b|\bre-?written\b|\bplaceholders?\b", re.I)
+# Slots whose names aren't labels a real message would use ("User First: Nora", "Weekday: Friday").
+LEAKY_SLOTS = {"user_first", "user_full", "sender_first", "sender_full", "recipient_first", "friend_first",
+               "sibling_first", "stranger_first", "person_a", "person_b", "delivery_weekday", "dx_text", "hcode",
+               "ccode", "last4"}
+SLOT_LABEL = re.compile(r"^[ \t]*[*\-\u2022]?[ \t]*([A-Za-z][A-Za-z _]{0,30}):[ \t]*\{([a-z_0-9]+)\}", re.M)
 CLOCK_WORDS = re.compile(r"\b(?:noon|midnight|o'clock)\b", re.I)
 
 BRANDS = ["Google", "Gmail", "Microsoft", "Outlook", "Teams", "Amazon", "Apple", "iPhone", "Zoom", "Slack", "FedEx",
@@ -101,6 +106,36 @@ def _banned_static() -> re.Pattern:
 def _shingles(text: str, n: int = 10) -> set[tuple[str, ...]]:
     words = re.findall(r"[a-z0-9']+", text.lower())
     return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _greets(line: str, slots: str) -> bool:
+    """Is this line a greeting (or chat-style 'Name:' prefix) addressed to one of these slots?"""
+    return bool(re.match(rf"^\s*(?:(?:hi|hey|hello|dear|morning|yo|ok|so)\s+)?\{{(?:{slots})\}}\s*(?:[,:!.\-—–]|$)",
+                         line, re.I))
+
+
+def _signs(line: str, slots: str) -> bool:
+    return bool(re.match(rf"^\s*[-—–~]*\s*\{{(?:{slots})\}}\s*[.!]?\s*$", line))
+
+
+def _role_problems(kind, body: str) -> list[str]:
+    """Mail is from the sender to the user (sent_reply: from the user). Greeting the sender, or signing as the
+    user, swaps who wrote it, and keeping track of who said what is part of the job."""
+    lines = [ln for ln in body.splitlines() if ln.strip() and not ln.lstrip().startswith(">")]
+    if not lines:
+        return []
+    first, last = lines[0], lines[-1]
+    if kind.sender == "the user":
+        me, them = "user_first|user_full", "recipient_first"
+    else:
+        me, them = "sender_first|sender_full", "user_first|user_full"
+    out = []
+    if _greets(first, me):
+        out.append(f"it's written by {kind.sender or 'the sender'} to {'a colleague' if kind.sender == 'the user' else 'the user'}"
+                   f": greet {{{them.split('|')[0]}}}, not {{{me.split('|')[0]}}}")
+    if _signs(last, them):
+        out.append(f"sign it as {{{me.split('|')[0]}}}, the writer, not {{{them.split('|')[0]}}}")
+    return out
 
 
 def problems(kind_name: str, fields: dict, refs: list[str] = (), names: set[str] = frozenset()) -> list[str]:
@@ -147,6 +182,15 @@ def problems(kind_name: str, fields: dict, refs: list[str] = (), names: set[str]
     for pattern, why in kind.forbid:
         if re.search(pattern, SLOT_RE.sub(" ", raw), re.I):
             out.append(why)
+
+    if kind.fields == ("subject", "body"):
+        out += _role_problems(kind, fields["body"])
+    for m in SLOT_LABEL.finditer(raw):
+        label, slot = re.sub(r"[\s_]+", "", m.group(1).lower()), m.group(2)
+        if slot in LEAKY_SLOTS and label and label in slot.replace("_", ""):
+            out.append(f"don't label a slot with its own name ('{m.group(0).strip()}'); write it the way a real "
+                       f"message would")
+            break
 
     bare = SLOT_RE.sub(" ", raw)  # only the template's own words
     allow = kind.allow

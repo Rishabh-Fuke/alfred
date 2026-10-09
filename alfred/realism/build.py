@@ -79,6 +79,15 @@ def prompt(kind: Kind, refs: list[dict], angle: dict, example: dict | None) -> s
     lines = [f"Write one template of kind '{kind.name}'.", "", f"What it is: {kind.describe}"]
     if kind.sender:
         lines.append(f"Who writes it: {kind.sender}.")
+    if kind.fields == ("subject", "body"):
+        if kind.sender == "the user":
+            lines.append("It's an email the user sends to a colleague: if it greets anyone, it greets {recipient_first}; "
+                         "if it's signed, it's signed {user_first}.")
+        else:
+            greet = "the user ({user_first})" if "user_first" in kind.slots else "the user"
+            sign = " ({sender_first})" if "sender_first" in kind.slots else ""
+            lines.append(f"It's an email from {kind.sender} to the user: if it greets anyone, it greets {greet}; if "
+                         f"it's signed, it's signed by the writer{sign}, never by the user.")
     lines += ["", f"Return a JSON object with exactly these keys: {', '.join(kind.fields)}."]
     if kind.required:
         lines += ["", "Slots it must use:"] + [slot_line(s) for s in kind.required]
@@ -250,6 +259,12 @@ def build(client, out: Path, refs: list[dict], model: str = DEFAULT_MODEL, kinds
     done: list[dict] = []
     if partial.exists():
         done = [json.loads(line) for line in partial.read_text().splitlines() if line.strip()]
+        # Templates written before a rule was added are checked again; ones that fail are written anew.
+        good = [e for e in done if not problems(e["kind"], e["fields"])]
+        if len(good) < len(done):
+            log(f"{len(done) - len(good)} earlier templates fail the current checks and will be rewritten.")
+            partial.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in good))
+            done = good
     seed_entries, _ = read_entries(resolve("seed"))
     examples = defaultdict(list)
     for e in seed_entries:

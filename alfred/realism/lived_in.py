@@ -24,16 +24,20 @@ MAIL_MIX = [("noise_work", 0.38), ("noise_notification", 0.30), ("noise_personal
 LOCATIONS = ["", "", "Video call", "Room 5A", "Room 1B", "4th floor kitchen", "Phone"]
 
 
-def _reserved(g) -> list[list[str]]:
-    """Every search a task (or a sensible agent doing it) might run, as term lists. Background text that matches
-    all terms of one would show up in that search, so it's left out."""
+def _reserved(g) -> tuple[list[list[str]], list[list[str]]]:
+    """What tasks (or a sensible agent doing them) search for, as term lists, for mail and for events. Background
+    text matching all terms of one would turn up in that search, so it's left out. Only names and this world's
+    appointment are reserved: reserving ordinary words ("car", "exam") would throw out half the background mail."""
     names = (C.FIRST_NAMES + C.LAST_NAMES + C.MOM_FIRST_NAMES + C.STRANGER_FIRST + C.STRANGER_LAST + C.STORES
              + [c for c, _ in C.CARRIERS] + [u for u, _ in C.UTILITIES] + [a for a, _, _ in C.AIRLINES]
              + [c for c, _ in C.CITIES] + C.CLINICS + C.BANKS + C.RESTAURANTS + C.VENDORS
-             + [p for _, p, _ in C.PERSONAL_EVENTS] + [pl for _, _, pl in C.PERSONAL_EVENTS]
-             + [g.therapist["name"], g.doctor, g.hooks["reply"]["topic"]])
-    out = [query_terms(n, EMAIL_STOP) for n in names] + [query_terms(n, CALENDAR_STOP) for n in names]
-    return [t for t in out if t]
+             + [pl for _, _, pl in C.PERSONAL_EVENTS] + [g.therapist["name"], g.doctor])
+    own = {g.user["first"], g.user["last"]}  # mail to the user names the user; no task searches for them
+    names = [n for n in names if n not in own]
+    mail = [t for t in (query_terms(n, EMAIL_STOP) for n in names) if t]
+    phrase = query_terms(g.hooks["lookup_event"]["phrase"], CALENDAR_STOP)  # "what time is my eye exam?"
+    events = [t for t in (query_terms(n, CALENDAR_STOP) for n in names) if t] + ([phrase] if phrase else [])
+    return mail, events
 
 
 def _clashes(text: str, reserved: list[list[str]]) -> bool:
@@ -175,8 +179,8 @@ def _calendar(g, r: random.Random, people: list[dict], reserved) -> None:
 
 
 def add_background(g, r: random.Random) -> None:
-    reserved = _reserved(g)
+    mail_reserved, event_reserved = _reserved(g)
     _reserve_task_slots(g)
     people = _people(g, r)
-    _mail(g, r, people, reserved)
-    _calendar(g, r, people, reserved)
+    _mail(g, r, people, mail_reserved)
+    _calendar(g, r, people, event_reserved)

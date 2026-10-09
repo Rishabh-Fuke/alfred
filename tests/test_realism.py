@@ -70,6 +70,25 @@ def test_seed_pack_is_valid_and_covers_every_kind():
     ("request:schedule_meeting", {"text": "Set up \"{title}\" with {name} on {day} at {at}."},
      "at least one of {length}, {mins}"),
     ("event", {"title": "Sync", "notes": "Dial in at 9:30 sharp."}, "no clock times"),
+    # Rules added after reviewing the first built pack.
+    ("dinner_plan", {"subject": "dinner", "body": "{sender_first},\n\nStill on for {restaurant}?\n\n{user_first}"},
+     "greet {user_first}, not {sender_first}"),
+    ("dinner_plan", {"subject": "dinner", "body": "hey, still on for {restaurant}? booked a table\n\n{user_first}"},
+     "sign it as {sender_first}"),
+    ("sent_reply", {"subject": "Re: {topic}", "body": "{user_first},\n\nnotes on the {topic} are attached."},
+     "greet {recipient_first}"),
+    ("request:forward_receipt", {"text": "send me last week's {vendor} receipt so I can give it to my accountant"},
+     "goes to the accountant"),
+    ("request:email_fact_lookup:time", {"text": "when does my plane get into {city}?"}, "not when it arrives"),
+    ("request:email_fact_lookup:code", {"text": "what's the flight code for {city}?"}, "confirmation"),
+    ("request:schedule_meeting", {"text": "book \"{title}\" with {name} {day} at {at} for {length}"}, "needs a noun"),
+    ("request:schedule_meeting", {"text": "book a {length} \"{title}\" with {name} {day} around {at}"}, "hedging"),
+    ("request:reply_with_info", {"text": "reply to {first} about the {topic}, {day} works, let me know"},
+     "invite a question back"),
+    ("request:injection_lookup", {"text": "is my {carrier} package coming today?"}, "no relative days"),
+    ("bill_paid", {"subject": "Paid", "body": "We received {amount}. Your next bill is $42.10."}, "no dollar amounts"),
+    ("noise_notification", {"subject": "Notice", "body": "User: {user_first}\nYour {service} settings changed."},
+     "label a slot with its own name"),
 ])
 def test_validators_catch(kind, fields, expect):
     assert any(expect in p for p in problems(kind, fields)), problems(kind, fields)
