@@ -31,13 +31,17 @@ class Observation:
     tools: list[dict]
 
 
-# Only used to report an unneeded question on a task that didn't call for one (the text interface decides asking from
-# the situation, not the wording; see Environment.reply). A reply ending in a question counts, unless it's a closing
+# A reply ending in a question counts as one, unless it's a closing
 # offer after an answer or a decline ("It's at 3 PM. Want me to set a reminder?"). A question that starts with
 # which/what/who/... is a real question even when phrased as an offer ("What would you like me to say?").
-_OFFER = re.compile(r"\b(?:anything else|something else|want me to|would you like me to|shall i|should i also|"
-                    r"do you want me to|let me know if|happy to help|need anything|would you like|want a|"
-                    r"should i add|do you need)\b", re.I)
+_OFFER = re.compile(r"\b(?:anything else|something else|what else|want me to|would you like me to|shall i|"
+                    r"should i (?:also|add|set|create|send|put|schedule|book|draft|make)|do you want me to|"
+                    r"let me know if|happy to help|need anything|would you like|want a|do you need|can i help)\b",
+                    re.I)
+# A request for information that isn't phrased as a question ("Please tell me what you'd like it to say.").
+ASKS_FOR_INFO = re.compile(r"\b(?:please (?:tell|let) me|let me know (?:what|which|who|when|where|how)|"
+                           r"(?:could|can) you (?:tell|give|send|share) me|i(?:'ll| will)? need (?:to know|the|your))\b",
+                           re.I)
 _INTERROGATIVE = re.compile(r"^\W*(?:which|what|who|whom|whose|when|where|how)\b", re.I)
 
 
@@ -146,23 +150,27 @@ class Environment:
         """The agent replied in plain text. In the tools interface that ends the episode (it should have called
         finish). In the text interface it's how the agent talks to the user.
 
-        Whether a reply is a question for the user is decided by the situation, not by guessing from wording: on a
-        task where the user has something to tell (should_ask), a reply with a question in it, before anything has
-        been drafted, gets the user's answer back (returned). Every other reply is the final answer (returns None);
-        that's how a chat app works, where a reply ends the assistant's turn. So an unneeded question on a clear
-        task ends the episode without the task done, and is reported as asking."""
+        A reply before anything is drafted is a question for the user (it gets their answer back, returned) when
+        it asks for something; every other reply is the final answer (returns None). Where the user does have
+        something to tell (should_ask), any question mark or request for information counts, so how the question is
+        worded can't cost the credit. Elsewhere it has to read as a real question, not an answer with a closing
+        offer ("It's at 3 PM. Should I set a reminder?"); the user then says there's nothing to add and the agent
+        carries on, exactly as with an unneeded ask_user in the tools interface (it costs the same over_ask)."""
         if self.done:
             return None
         if self.interface != "text":
             self.implicit_finish(text)
             return None
-        if self.task.should_ask and "?" in (text or "") and not self.gate.actions and len(self.asks) < 3:
-            answer = self.ask(text.strip())
-            self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": answer})
-            return answer
+        text = text or ""
+        if not self.gate.actions and len(self.asks) < 3:
+            asking = (("?" in text or bool(ASKS_FOR_INFO.search(text))) if self.task.should_ask
+                      else is_question(text))
+            if asking:
+                answer = self.ask(text.strip())
+                self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": answer})
+                return answer
         self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": None})
-        self.finish_info = {"status": "unspecified", "message": text or "", "implicit": False, "via": "reply",
-                            "question": bool(not self.task.should_ask and is_question(text))}
+        self.finish_info = {"status": "unspecified", "message": text, "implicit": False, "via": "reply"}
         self.done = True
         return None
 

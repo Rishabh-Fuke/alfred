@@ -93,7 +93,7 @@ INABILITY = re.compile(
     r"(?:is )?not possible|isn['’]?t possible|not capable|"
     r"beyond (?:my|what i)|outside (?:of )?(?:my|what i)|no (?:tool|ability|capability|option) to|"
     r"no way (?:of|to)|(?:isn['’]?t|is not|aren['’]?t|are not) supported|"
-    r"(?:don['’]?t|do not|doesn['’]?t|does not) support|i can only|no tools? (?:available|that)|"
+    r"(?:don['’]?t|do not|doesn['’]?t|does not) support|i can only(?! (?:see|find|spot))|no tools? (?:available|that)|"
     r"(?:don['’]?t|do not) have (?:real[- ]time|live|current)|not (?:within|in) my (?:abilities|capabilities))\b",
     re.I)
 

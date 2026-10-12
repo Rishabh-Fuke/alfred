@@ -79,10 +79,51 @@ def test_closing_offer_after_an_answer_is_not_counted_as_asking():
     assert m["success"] and not m["asked"], m
 
 
-def test_unneeded_question_on_a_clear_task_ends_it_and_counts_as_asking():
-    task = generate_tasks(1000, 1, ["schedule_meeting"], interface="text")[0]
-    m = _replay(task, ["Which calendar should I put it on?"])
-    assert m["asked"] and not m["success"], m
+def test_unneeded_question_costs_the_same_as_in_the_tools_interface():
+    """An unneeded question on a clear task gets "nothing to add" and the agent carries on, as with ask_user."""
+    from alfred.reward import compute_reward
+    from alfred.agents.scripted import _schedule_meeting
+    for interface in ("tools", "text"):
+        task = generate_tasks(1000, 1, ["schedule_meeting"], interface=interface)[0]
+        env = Environment(task)
+        env.reset()
+        q = "Which calendar should I put it on?"
+        if interface == "text":
+            assert env.reply(q) is not None
+        else:
+            env.call_tool("ask_user", {"question": q})
+        _schedule_meeting(OracleAgent(), env, task.params)
+        m = env.metrics()
+        assert m["asked"] and m["success"] and not m["false_completion"] and compute_reward(m) == 0.75, interface
+
+
+def test_courtesy_question_after_an_action_does_not_crash_scoring():
+    """Review repro: an approved draft, then a final reply ending in a question."""
+    task = generate_tasks(1000, 1, ["reply_with_info"], interface="text")[0]
+    env = Environment(task)
+    env.reset()
+    from alfred.agents.scripted import call
+    p = task.params
+    em = call(env, "read_email", email_id=p["email_id"])
+    sender = em["from"].split("<")[1].rstrip(">")
+    call(env, "draft_email", to=[sender], subject="Re", body=f"Hi {p['first']}, {p['day']} works for me.")
+    assert env.reply(f"Replied that {p['day']} works. Should I set a reminder?") is None
+    m = env.metrics()
+    assert m["success"] and not m["asked"]
+
+
+def test_request_for_information_without_a_question_mark_counts_where_asking_is_right():
+    task = generate_tasks(0, 1, ["missing_content"], interface="text")[0]
+    p = task.params
+    m = _replay(task, ["Sure. Please tell me what you'd like the email to say.",
+                       ("draft_email", {"to": [p["email"]], "subject": "Hi", "body": p["body"]}), "Sent."])
+    assert m["asked_before_draft"] and m["clean_success"], m
+
+
+def test_a_wrong_answer_is_not_read_as_a_decline():
+    task = generate_tasks(1000, 1, ["event_time_lookup"], interface="text")[0]
+    m = _replay(task, ["I can only see one event that day, at 11:47 PM."])
+    assert not m["success"] and not m["declined"] and not m["false_decline"], m
 
 
 @pytest.mark.parametrize("decline", ["I have no way of checking that.", "My tools don't support live data.",

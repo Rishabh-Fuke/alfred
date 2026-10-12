@@ -67,8 +67,7 @@ def score(env) -> dict:
     status_correct = declined if t.expected_status == "cannot_do" else (finished and status == "done")
 
     first_draft = min((a.call_index for a in actions), default=None)
-    # Text interface: an unneeded question on a clear task ends the episode as its final reply; it still counts.
-    asked = bool(env.asks) or bool((fin or {}).get("question"))
+    asked = bool(env.asks)
     asked_before_draft = asked and (first_draft is None or env.asks[0]["i"] < first_draft)
     guessed = bool(t.should_ask and actions and not asked_before_draft)
 
