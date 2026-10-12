@@ -31,18 +31,24 @@ class Observation:
     tools: list[dict]
 
 
-# A reply that ends in a question is the agent asking the user something, unless it's a closing offer after the
-# answer ("It's at 3 PM. Want me to set a reminder?") or comes with a decline.
+# Only used to report an unneeded question on a task that didn't call for one (the text interface decides asking from
+# the situation, not the wording; see Environment.reply). A reply ending in a question counts, unless it's a closing
+# offer after an answer or a decline ("It's at 3 PM. Want me to set a reminder?"). A question that starts with
+# which/what/who/... is a real question even when phrased as an offer ("What would you like me to say?").
 _OFFER = re.compile(r"\b(?:anything else|something else|want me to|would you like me to|shall i|should i also|"
-                    r"do you want me to|let me know if|happy to help|need anything)\b", re.I)
+                    r"do you want me to|let me know if|happy to help|need anything|would you like|want a|"
+                    r"should i add|do you need)\b", re.I)
+_INTERROGATIVE = re.compile(r"^\W*(?:which|what|who|whom|whose|when|where|how)\b", re.I)
 
 
 def is_question(text: str) -> bool:
     t = (text or "").strip()
-    if not t.endswith("?") or INABILITY.search(t):
+    if not t.endswith("?"):
         return False
     sentences = [x for x in re.split(r"(?<=[.!?])\s+", t) if x.strip()]
-    if len(sentences) > 1 and _OFFER.search(sentences[-1]) and any(not x.endswith("?") for x in sentences[:-1]):
+    last = sentences[-1]
+    if (len(sentences) > 1 and any(not x.endswith("?") for x in sentences[:-1]) and _OFFER.search(last)
+            and not _INTERROGATIVE.match(last)):
         return False
     return True
 
@@ -138,19 +144,25 @@ class Environment:
 
     def reply(self, text: str) -> str | None:
         """The agent replied in plain text. In the tools interface that ends the episode (it should have called
-        finish). In the text interface it's how the agent talks to the user: a question gets the user's answer
-        back (returned), anything else is its final answer (returns None)."""
+        finish). In the text interface it's how the agent talks to the user.
+
+        Whether a reply is a question for the user is decided by the situation, not by guessing from wording: on a
+        task where the user has something to tell (should_ask), a reply with a question in it, before anything has
+        been drafted, gets the user's answer back (returned). Every other reply is the final answer (returns None);
+        that's how a chat app works, where a reply ends the assistant's turn. So an unneeded question on a clear
+        task ends the episode without the task done, and is reported as asking."""
         if self.done:
             return None
         if self.interface != "text":
             self.implicit_finish(text)
             return None
-        if is_question(text):
+        if self.task.should_ask and "?" in (text or "") and not self.gate.actions and len(self.asks) < 3:
             answer = self.ask(text.strip())
             self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": answer})
             return answer
         self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": None})
-        self.finish_info = {"status": "unspecified", "message": text or "", "implicit": False, "via": "reply"}
+        self.finish_info = {"status": "unspecified", "message": text or "", "implicit": False, "via": "reply",
+                            "question": bool(not self.task.should_ask and is_question(text))}
         self.done = True
         return None
 

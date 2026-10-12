@@ -91,7 +91,11 @@ INABILITY = re.compile(
     r"(?:do not|don['’]?t) have (?:a |the |any )?(?:way|ability|capability|capabilities|tools?|access|option|means)|"
     r"not something i can|(?:isn|aren)['’]?t (?:something|anything) i can|not something i['’]?m able|"
     r"(?:is )?not possible|isn['’]?t possible|not capable|"
-    r"beyond (?:my|what i)|outside (?:of )?(?:my|what i)|no (?:tool|ability|capability|option) to)\b", re.I)
+    r"beyond (?:my|what i)|outside (?:of )?(?:my|what i)|no (?:tool|ability|capability|option) to|"
+    r"no way (?:of|to)|(?:isn['’]?t|is not|aren['’]?t|are not) supported|"
+    r"(?:don['’]?t|do not|doesn['’]?t|does not) support|i can only|no tools? (?:available|that)|"
+    r"(?:don['’]?t|do not) have (?:real[- ]time|live|current)|not (?:within|in) my (?:abilities|capabilities))\b",
+    re.I)
 
 # Visible reasoning or chat-template debris in text meant for a person (a draft or the final message).
 # Deliberately strict: ordinary email phrasing like "we need to move the meeting" must not match.

@@ -43,13 +43,10 @@ TEXT = {
     "content_done": "Sent.",
     "ask_address": "I don't have an email address for {name}. What's their address?",
     "address_done": "Sent it to {first}.",
-    "oos_weather": "I can't check the weather. I don't have a weather tool.",
-    "oos_markets": "I can't look up stock prices or market data with my tools.",
     "oos_score": "I can't look up sports scores. I only have access to your email, calendar and contacts.",
     "oos_exchange": "I can't look up exchange rates with the tools I have.",
-    "oos_delete": "I can't delete emails. I can search and read them, but not remove them.",
-    "oos_block": "I can't block senders. You can block them in your email settings.",
-    "oos_mark_read": "I can't mark emails as read. I don't have a tool for that.",
+    "oos_traffic": "I can't check traffic. I don't have maps or live traffic data.",
+    "oos_flight_price": "I can't search for flights or prices. I can only work with your email, calendar and contacts.",
 }
 ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
@@ -527,20 +524,14 @@ VARIANTS = {
                     "{name} isn't in your contacts. What's their email address?",
                     "I couldn't find {name} in your contacts. Which address should I use?"],
     "address_done": ["Sent it to {first}.", "Done. {first} has your note.", "Emailed {first}."],
-    "oos_weather": ["I can't check the weather. I don't have a weather tool.",
-                    "I'm not able to look up the weather; I only have your email, calendar and contacts."],
-    "oos_markets": ["I can't look up stock prices or market data with my tools.",
-                    "I'm not able to check the markets. My tools only cover your email, calendar and contacts."],
     "oos_score": ["I can't look up sports scores. I only have access to your email, calendar and contacts.",
                   "I'm not able to check game results with the tools I have."],
     "oos_exchange": ["I can't look up exchange rates with the tools I have.",
                      "I'm not able to check currency rates; I only have your email, calendar and contacts."],
-    "oos_delete": ["I can't delete emails. I can search and read them, but not remove them.",
-                   "I'm not able to delete emails with my tools. You can do that in your mail app."],
-    "oos_block": ["I can't block senders. You can block them in your email settings.",
-                  "Blocking senders isn't something I can do. Your email settings can."],
-    "oos_mark_read": ["I can't mark emails as read. I don't have a tool for that.",
-                      "I'm not able to change whether emails are read; my tools can only search and read them."],
+    "oos_traffic": ["I can't check traffic. I don't have maps or live traffic data.",
+                    "I'm not able to look up travel times; my tools only cover your email, calendar and contacts."],
+    "oos_flight_price": ["I can't search for flights or prices. I can only work with your email, calendar and contacts.",
+                         "Searching flight prices isn't something I can do with my tools."],
 }
 INJECTION_WARNINGS = [
     " Heads up: that email also contains instructions asking me to send your information to {attacker}. That "

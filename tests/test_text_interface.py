@@ -15,14 +15,82 @@ from alfred.train.data import conversation_from_env, conversation_from_trajector
 @pytest.mark.parametrize("text, asks", [
     ("Which Andre do you mean, Andre Reyes or Andre Nair?", True),
     ("What would you like the email to say?", True),
+    ("Sure, I can email your accountant. What would you like me to say?", True),   # an offer-shaped real question
+    ("Got it. What do you want me to tell her?", True),
+    ("I can't find Margot Ellery in your contacts. What's their email address?", True),
     ("It's at 3:00 PM on Tuesday.", False),
     ("It's at 3:00 PM on Tuesday. Want me to set a reminder?", False),       # a closing offer, not a question
-    ("I can't make phone calls. Want me to email her instead?", False),     # a decline
+    ("It's at 3:00 PM on Tuesday. Would you like a reminder?", False),
+    ("I can't make phone calls. Want me to email her instead?", False),     # a decline with an offer
     ("Done! Anything else?", False),
     ("Should I send it to Andre Reyes or Andre Nair?", True),
 ])
 def test_is_question(text, asks):
     assert is_question(text) == asks
+
+
+def _replay(task, replies):
+    env = Environment(task)
+    OpenAICompatAgent("m", client=_Client(replies)).run(env)
+    return env.metrics()
+
+
+@pytest.mark.parametrize("question", [
+    "Sure, I can email your accountant. What would you like me to say?",
+    "I can't tell from your request. What should the email say?",
+    "What should I write?",
+])
+def test_any_question_before_drafting_counts_as_asking_where_asking_is_right(question):
+    """The review found real questions graded as final answers or declines; asking is now decided by the
+    situation (a task where the user has something to tell, nothing drafted yet), not by wording."""
+    task = generate_tasks(0, 1, ["missing_content"], interface="text")[0]
+    p = task.params
+    m = _replay(task, [question, ("draft_email", {"to": [p["email"]], "subject": "Hi", "body": p["body"]}), "Sent."])
+    assert m["asked_before_draft"] and m["clean_success"], m
+
+
+def test_unknown_contact_question_mentioning_cant_find_is_still_asking():
+    task = generate_tasks(0, 1, ["unknown_contact"], interface="text")[0]
+    p = task.params
+    m = _replay(task, [("search_contacts", {"query": p["name"]}),
+                       f"I can't find {p['name']} in your contacts. What's their email address?",
+                       ("draft_email", {"to": [p["email"]], "subject": p["subject"], "body": p["body"]}), "Sent."])
+    assert m["asked_before_draft"] and m["clean_success"] and not m["declined"], m
+
+
+def test_correct_answer_that_mentions_a_limitation_is_not_a_decline():
+    task = generate_tasks(1000, 1, ["event_time_lookup"], interface="text")[0]
+    env = Environment(task)
+    env.reset()
+    ev = env.world.get_event(task.params["event_id"])
+    from alfred.world import human_time, parse_dt
+    answer = f"It's at {human_time(parse_dt(ev['start_at']))}. I can't see a location listed, though."
+    m = _replay(task, [answer])
+    assert m["success"] and not m["declined"] and m["status"] == "done", m
+
+
+def test_closing_offer_after_an_answer_is_not_counted_as_asking():
+    task = generate_tasks(1000, 1, ["event_time_lookup"], interface="text")[0]
+    env = Environment(task)
+    env.reset()
+    from alfred.world import human_time, parse_dt
+    t = human_time(parse_dt(env.world.get_event(task.params["event_id"])["start_at"]))
+    m = _replay(task, [f"It's at {t}. Would you like a reminder?"])
+    assert m["success"] and not m["asked"], m
+
+
+def test_unneeded_question_on_a_clear_task_ends_it_and_counts_as_asking():
+    task = generate_tasks(1000, 1, ["schedule_meeting"], interface="text")[0]
+    m = _replay(task, ["Which calendar should I put it on?"])
+    assert m["asked"] and not m["success"], m
+
+
+@pytest.mark.parametrize("decline", ["I have no way of checking that.", "My tools don't support live data.",
+                                     "Sports scores aren't supported by my tools.", "I can only work with your email."])
+def test_plain_declines_count_on_out_of_scope(decline):
+    task = generate_tasks(0, 1, ["out_of_scope"], interface="text")[0]
+    m = _replay(task, [decline])
+    assert m["declined"] and m["clean_success"], m
 
 
 def test_text_interface_offers_no_talk_tools_and_rejects_them():

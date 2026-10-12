@@ -170,6 +170,9 @@ def batch_stats(episodes: list[Episode]) -> dict:
 
 
 def _finish_message(ep: Episode) -> str:
+    if ep.task.interface == "text":  # the final plain reply
+        return next((m.get("content") or "" for m in reversed(ep.messages)
+                     if m.get("role") == "assistant" and not m.get("tool_calls")), "")
     for msg in reversed(ep.messages):
         for tc in msg.get("tool_calls") or []:
             if tc["function"]["name"] == "finish":

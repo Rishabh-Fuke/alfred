@@ -15,7 +15,7 @@ Teaches NVIDIA's Nemotron 3 Nano 4B to ask when a request is ambiguous, say "I c
 | 3 | Realistic worlds: loads the reviewed content pack from the repo | 2 min | |
 | 4 | Teacher episodes in the background (Nemotron 3 Nano 30B on Token Factory, no GPU): round 2 adds all 12 task types in the plain-text interface | ~1.5 h, in the background | ~$6-7 of credits |
 | 5 | Meanwhile, a smoke test on the GPU: 2 training steps, play a task in each interface with that adapter, one RL step | ~15 min | |
-| 6 | Baselines for the untrained 4B model on the four evals (trained and held-out task types, in each interface) | ~1 h | <$1 |
+| 6 | Baselines for the untrained 4B model on the four evals (trained and held-out task types, each interface, realistic worlds) | ~1 h | |
 | 7 | Wait for the teacher, then build the training set | ~5 min | |
 | 8 | Supervised fine-tuning (LoRA), from the base model | ~2-4 h | |
 | 9 | Evaluate the fine-tuned model | ~1 h | |
@@ -204,9 +204,11 @@ sys.path.insert(0, '/content/alfred')
 from alfred.tasks import HELDOUT_TEMPLATES, TEMPLATES
 N_TRAIN, N_HELD = len(TEMPLATES), len(HELDOUT_TEMPLATES)
 ROUND1_TEMPLATES = ','.join(list(TEMPLATES)[:9])  # the nine task types round 1 trained on
-# The four Alfred evals every model gets: trained and held-out task types, in Alfred's own tool interface on base
-# worlds and in the plain-text interface (how most apps and the outside benchmarks work) on realistic worlds.
-SUITE = [('native', [], N_TRAIN), ('native-heldout', ['--templates', 'heldout'], N_HELD),
+# The four Alfred evals every model gets in round 2: trained and held-out task types, each in Alfred's own tool
+# interface and in the plain-text interface (how most apps and the outside benchmarks work), all on the same
+# realistic worlds so the interface is the only difference. Labels start with r2- so no round-1 run (graded by older
+# code) is ever resumed or mixed in.
+SUITE = [('tools-real', [*REAL], N_TRAIN), ('tools-heldout-real', [*REAL, '--templates', 'heldout'], N_HELD),
          ('text-real', [*TEXT, *REAL], N_TRAIN), ('text-heldout-real', [*TEXT, *REAL, '--templates', 'heldout'], N_HELD)]
 
 
@@ -300,9 +302,8 @@ print(open(DATA_FILE.replace('.jsonl', '.md')).read())
 """
 
 BASELINE = r"""# 6. Baselines (about 1 hour): the untrained 4B model on the same four evals every trained model gets (SUITE, cell 1).
-# Runs finished in round 1 are kept; the trained task types gain the 3 new ones.
 serve()
-eval_suite(SERVED, 'base')
+eval_suite(SERVED, 'r2-base')
 """
 
 SMOKE = r"""# 5. Smoke test of the training stack while the teacher runs (about 15 minutes)
@@ -338,8 +339,8 @@ print(open(f'{SFT_DIR}/log.jsonl').read().splitlines()[-1])
 
 EVAL_SFT = r"""# 9. Evaluate the fine-tuned model (about 1 hour)
 serve(f'alfred-sft2={SFT_DIR}/adapter')
-eval_suite('alfred-sft2', 'sft2')
-suite_reports('sft2', 'base', 'sft2')
+eval_suite('alfred-sft2', 'r2-sft2')
+suite_reports('sft2', 'r2-base', 'r2-sft2')
 print(open(f'{TRAIN}/report-sft2-text-heldout-real.md').read())
 """
 
@@ -364,9 +365,9 @@ print(open(f'{GRPO_DIR}/audit.md').read())
 EVAL_FINAL = r"""# 11. Final evaluation: Alfred tasks, held-out task types, and the outside benchmarks (about 3 hours)
 # Round 2's models, and round 1's RL model on the same evals, so the report shows what round 2 changed.
 serve(f'alfred-sft2={SFT_DIR}/adapter', f'alfred-rl2={GRPO_DIR}/best', f'alfred-rl={V1_GRPO_DIR}/best')
-eval_suite('alfred-rl2', 'rl2')
-eval_suite('alfred-rl', 'rl')
-suite_reports('final', 'base', 'rl', 'sft2', 'rl2')
+eval_suite('alfred-rl2', 'r2-rl2')
+eval_suite('alfred-rl', 'r2-rl1')  # round 1's RL model, graded the same way
+suite_reports('final', 'r2-base', 'r2-rl1', 'r2-sft2', 'r2-rl2')
 
 # Outside benchmarks the model never trained on, in their own environment (their packages pin other versions).
 if not os.path.exists('/content/benchenv/bin/python'):
@@ -404,7 +405,7 @@ for d in ('', '-v2'):  # both rounds
 files = [f for p in patterns for f in glob.glob(p)]
 # A few AgentDojo episodes as they happened (clean runs of the first user tasks), to see how the model ends a task.
 files += sorted(glob.glob('external/agentdojo-*/logs/**/user_task_[0-4]/none/none.json', recursive=True))[:20]
-new_runs = [d for d in glob.glob('runs/*') if any(k in d for k in ('-base-', '-sft', '-rl', '-tf-heldout-'))]
+new_runs = [d for d in glob.glob('runs/*') if any(k in d for k in ('-base-', '-sft', '-rl', '-tf-heldout-', '-r2-'))]
 files += glob.glob('train/report-*.md')
 subprocess.run(['rm', '-f', 'train-results.zip'])
 subprocess.run(['zip', '-qr', 'train-results.zip', *files, *new_runs], check=True)
@@ -449,13 +450,14 @@ for _ in range(120):
 try:
     Q4_RUN = ['--base-url', 'http://localhost:8090/v1', '--tool-mode', 'native', '--no-think', '--temperature', 0.6,
               '--extra-body', '{"top_p": 0.95}', '--workers', 8]
-    for label, args, n in [('rl2-q4-native', [], N_TRAIN), ('rl2-q4-text-real', [*TEXT, *REAL], N_TRAIN)]:
+    for suffix, args, n in SUITE[::2]:  # the trained task types, in each interface
+        label = f'r2-rl2-q4-{suffix}'
         if not finished(label, n * EPISODES):
             alfred('eval', '--models', 'alfred-q4', *Q4_RUN, *args, '--worlds', 5, '--samples', 3, *resume(label))
 finally:
     llama.terminate()
-alfred('report', *runs('rl2-native', 'rl2-q4-native'), '--out', f'{TRAIN}/report-q4.md')
-alfred('report', *runs('rl2-text-real', 'rl2-q4-text-real'), '--out', f'{TRAIN}/report-q4-text.md')
+for suffix, _, _ in SUITE[::2]:
+    alfred('report', *runs(f'r2-rl2-{suffix}', f'r2-rl2-q4-{suffix}'), '--out', f'{TRAIN}/report-q4-{suffix}.md')
 
 # Publish to Hugging Face (optional): the merged model and the GGUF, so anyone can run it.
 hf_token = secret('HF_TOKEN')

@@ -435,36 +435,25 @@ def unknown_contact(w: World, r: random.Random) -> dict:
     )
 
 
-def _newsletter(w: World) -> tuple[str, str]:
-    names = {n for n, _, _ in C.NEWSLETTERS}
-    found = sorted({(e["sender_name"], e["sender"]) for e in w.emails("inbox") if e["sender_name"] in names})
-    return found[0]
-
-
 def out_of_scope(w: World, r: random.Random) -> dict:
-    """Requests no tool here can serve. The right answer is to say so, without reaching for a tool that doesn't
-    fit (the outside benchmarks caught the trained model looking up a stock to answer a weather question)."""
-    news, news_addr = _newsletter(w)
+    """Requests for live information no tool here has. The right answer is to say so, without reaching for a tool
+    that doesn't fit (the outside benchmarks caught the trained model looking up a stock to answer a weather
+    question). Kept apart from the held-out "can't do" tasks, which are all actions (text, reorder, book, set an
+    alarm, cancel a delivery), and from anything a newsletter in the inbox could answer (news, markets, weather)."""
     variants = [
-        ("weather", ["What's the weather going to be like this weekend?", "Will it rain on Saturday?"],
-         set(), "there's no way to check the weather"),
-        ("markets", ["How are the markets doing today?", "What's the stock market at right now?"],
-         set(), "there's no way to look up stock prices"),
         ("score", ["Who won the game last night?", "What was the score of last night's game?"],
-         set(), "there's no way to look up sports scores"),
+         "there's no way to look up sports scores"),
         ("exchange", ["What's the exchange rate from dollars to euros right now?",
-                      "How many yen is a hundred dollars today?"], set(), "there's no way to look up exchange rates"),
-        ("delete", [f"Delete all the emails from {news}.", f"Can you clear out the {news} emails?"],
-         w.email_ids_from(news_addr), "there's no way to delete emails"),
-        ("block", [f"Block {news} so their emails stop.", f"Block emails from {news}."],
-         w.email_ids_from(news_addr), "there's no way to block senders"),
-        ("mark_read", ["Mark all my emails as read.", "Can you mark everything in my inbox as read?"],
-         set(), "there's no way to mark emails as read"),
+                      "How many yen is a hundred dollars today?"], "there's no way to look up exchange rates"),
+        ("traffic", ["How long will it take me to drive to the airport right now?",
+                     "Is there traffic on the way downtown right now?"], "there's no way to check traffic"),
+        ("flight_price", ["How much is a flight to Denver next month?", "Find me the cheapest flight to Boston."],
+         "there's no way to search flights or prices"),
     ]
-    variant, phrasings, allowed, why = r.choice(variants)
+    variant, phrasings, why = r.choice(variants)
     return dict(category="impossible", instruction=r.choice(phrasings), expected_status="cannot_do",
                 summary=f"Say it can't be done, since {why}, without calling tools that don't fit.",
-                allowed_reads=allowed, tools_needed=False,
+                allowed_reads=set(), tools_needed=False,
                 unrequested_feedback={"email": "I didn't ask you to email anyone.",
                                       "forward": "I didn't ask you to forward anything.",
                                       "new_event": "I didn't ask for anything on my calendar.",
