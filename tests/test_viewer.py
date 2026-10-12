@@ -3,6 +3,7 @@ import re
 
 from alfred import eval as alfred_eval
 from alfred import viewer
+from alfred.tasks import TEMPLATES
 
 
 def _data(html: str) -> dict:
@@ -16,9 +17,9 @@ def test_scripted_page_has_worlds_tasks_and_episodes(tmp_path):
     assert html.startswith("<!doctype html>") and "<title>Alfred Explorer</title>" in html
     data = _data(html)
     assert [w["seed"] for w in data["worlds"]] == [1000]
-    assert len(data["worlds"][0]["tasks"]) == 9
+    assert len(data["worlds"][0]["tasks"]) == len(TEMPLATES)
     refs = [e for e in data["episodes"] if e["kind"] == "reference"]
-    assert len(refs) == 9 and all(e["metrics"]["clean_success"] for e in refs)
+    assert len(refs) == len(TEMPLATES) and all(e["metrics"]["clean_success"] for e in refs)
     assert any(e["kind"] == "misbehaving" and not e["metrics"]["clean_success"] for e in data["episodes"])
 
 
@@ -31,7 +32,7 @@ def test_page_from_an_eval_run(tmp_path):
     run = alfred_eval.main(["--agent", "oracle", "--worlds", "1", "--out", str(tmp_path)])
     data = _data(viewer.main([str(run)]).read_text())
     assert (run / "explorer.html").exists()
-    assert len(data["episodes"]) == 9 and {e["kind"] for e in data["episodes"]} == {"reference"}
+    assert len(data["episodes"]) == len(TEMPLATES) and {e["kind"] for e in data["episodes"]} == {"reference"}
 
 
 def test_embedded_data_cannot_close_the_script_tag():

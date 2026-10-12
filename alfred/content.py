@@ -185,3 +185,10 @@ NOISE_SERVICES = [("Quaywise Cloud", "no-reply@quaywise.example"), ("Fennel Pay"
                                                                        "policy@hearthstone-ins.example"),
                   ("Sprocket Code Review", "notify@sprocket.example"), ("Cobblestone Library",
                                                                          "circulation@cobblestonelib.example")]
+
+# ----------------------------------------------------------------------------- talk-first training tasks
+# People the user wants to reach who are in no contact list or email: the assistant has to ask for the address.
+# None prefix-matches a name above.
+UNKNOWN_PEOPLE = [("Margot", "Ellery"), ("Desmond", "Halvorsen"), ("Priscilla", "Abara"), ("Lionel", "Okoro"),
+                  ("Tamsin", "Greer"), ("Ezra", "Vandermeer"), ("Ottilie", "Brandt"), ("Silas", "Mbeki")]
+UNKNOWN_DOMAINS = ["fieldnote.example", "harborlight.example", "quillmail.example"]

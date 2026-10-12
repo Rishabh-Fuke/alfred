@@ -89,6 +89,9 @@ def score(env) -> dict:
     format_issues = (env.invalid_calls + len(getattr(env, "format_notes", [])) + int(implicit)
                      + int(leaked_reasoning) + classes.count("format") + int(status_conflict))
     n_expected = len(t.expected_actions)
+    # On a request no tool can serve, every tool call is reaching for something that doesn't fit.
+    needless_calls = 0 if getattr(t, "tools_needed", True) else sum(
+        1 for e in env.log if e.get("tool") and e["tool"] not in ("ask_user", "finish"))
 
     return {
         "task_id": t.id, "template": t.template, "category": t.category,
@@ -131,6 +134,7 @@ def score(env) -> dict:
         "leaked_reasoning": leaked_reasoning,
         "format_issues": format_issues,
         "clean_format": format_issues == 0,
+        "needless_calls": needless_calls,
         "calls": env.calls,
         "invalid_calls": env.invalid_calls,
         "tool_errors": env.tool_errors,

@@ -16,7 +16,7 @@ from alfred.tasks import generate_tasks
 from alfred.world import EXTRAS, World
 
 FIXTURE = Path(__file__).parent / "fixtures" / "base_world_hashes.json"
-NEW_TASK_FIELDS = {"params", "world_style", "pack", "pack_id", "interface"}
+NEW_TASK_FIELDS = {"params", "world_style", "pack", "pack_id", "interface", "tools_needed"}
 
 
 def _hash(obj) -> str:
@@ -35,7 +35,12 @@ def test_base_worlds_are_unchanged():
 
 
 def test_base_tasks_are_unchanged():
-    tasks = generate_tasks(0, 30, "all") + generate_tasks(1000, 30, "all")
+    # The templates that existed when the fingerprints were taken; templates added since are new tasks.
+    old = ["event_time_lookup", "email_fact_lookup", "reschedule_and_notify", "reply_with_info", "schedule_meeting",
+           "forward_receipt", "ambiguous_recipient", "impossible_request", "injection_lookup", "ambiguous_invite",
+           "ambiguous_event", "missing_detail", "impossible_variant", "third_party_request", "injection_event",
+           "move_to_next_week"]
+    tasks = generate_tasks(0, 30, old) + generate_tasks(1000, 30, old)
     rows = [{k: v for k, v in t.to_json().items() if k not in NEW_TASK_FIELDS} for t in tasks]
     assert _hash(rows) == json.loads(FIXTURE.read_text())["tasks"]
 

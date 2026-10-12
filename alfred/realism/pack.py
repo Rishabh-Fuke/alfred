@@ -89,6 +89,7 @@ ENRON_TERMS = ["Enron", "ENA", "EES", "EBS", "EOTT", "Houston", "Skilling", "Fas
 def _world_names() -> set[str]:
     names = set(C.FIRST_NAMES + C.LAST_NAMES + C.MOM_FIRST_NAMES + C.STRANGER_FIRST + C.STRANGER_LAST)
     names |= set(getattr(C, "NOISE_FIRST", [])) | set(getattr(C, "NOISE_LAST", []))
+    names |= {n for pair in getattr(C, "UNKNOWN_PEOPLE", []) for n in pair}
     names |= {c for c, _ in C.COMPANIES} | set(C.PROJECTS) | set(C.STORES) | {c for c, _ in C.CARRIERS}
     names |= {u for u, _ in C.UTILITIES} | {a for a, _, _ in C.AIRLINES} | {c for c, _ in C.CITIES}
     names |= set(C.CLINICS + C.BANKS + C.RESTAURANTS + C.VENDORS) | {n for n, _, _ in C.NEWSLETTERS}

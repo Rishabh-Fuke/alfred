@@ -7,7 +7,7 @@ from alfred import eval as alfred_eval
 from alfred.agents.scripted import TeachingOracle
 from alfred.dev.replay_server import serve_in_thread
 from alfred.env import Environment
-from alfred.tasks import EVAL_WORLD_START, TRAIN_WORLDS, VALIDATION_WORLDS, generate_tasks
+from alfred.tasks import EVAL_WORLD_START, TEMPLATES, TRAIN_WORLDS, VALIDATION_WORLDS, generate_tasks
 from alfred.train import data
 
 
@@ -106,8 +106,8 @@ def test_end_to_end_from_a_teacher_run(tmp_path):
     train = [json.loads(x) for x in out.read_text().splitlines()]
     val = [json.loads(x) for x in out.with_suffix(".val.jsonl").read_text().splitlines()]
     rows = train + val
-    assert len(rows) == 27  # 3 per template: 2 from the teacher, topped up with 1 scripted
-    assert sum(r["source"] == "teacher:replay" for r in rows) == 18
+    assert len(rows) == 3 * len(TEMPLATES)  # 3 per template: 2 from the teacher, topped up with 1 scripted
+    assert sum(r["source"] == "teacher:replay" for r in rows) == 2 * len(TEMPLATES)
     assert {r["task_id"] for r in train}.isdisjoint({r["task_id"] for r in val})
     for r in rows:
         assert r["world_seed"] in TRAIN_WORLDS and r["tools"] and len(r["train"]) >= 1

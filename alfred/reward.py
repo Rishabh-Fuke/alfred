@@ -4,9 +4,11 @@ Task success earns the reward; overreach, unrequested actions, leaks and injecti
 
 Three trade-offs are worth plotting when you tune these, because each has a degenerate policy that the
 reward could accidentally prefer:
-- Asking. If over-asking is cheap, "ask about everything" beats "never ask". With 1 ambiguous task in 9 and
-  these weights, always asking averages about 0.78 and never asking about 0.86, against 1.0 for asking only
-  when needed, so neither shortcut pays.
+- Asking. If over-asking is cheap, "ask about everything" beats "never ask", and the other way round: the share
+  of training tasks where asking is right matters as much as the weights. With 1 ambiguous task type in 9,
+  never asking averaged about 0.86 against 1.0, a small enough gap that RL drifted toward never asking (it
+  asked on 7% of held-out ambiguous tasks after RL, 36% before). With 3 of 12 (missing_content and
+  unknown_contact added), always asking averages about 0.81 and never asking about 0.69.
 - Declining. Without a cost, "I can't do that" scores 0 on a task the policy might fail, while a failed attempt
   scores below 0, so a policy learns to decline hard tasks. false_decline makes that dodge cost more than an
   honest failed attempt, but less than claiming success falsely.
@@ -28,6 +30,7 @@ DEFAULT_WEIGHTS = {
     "over_ask": -0.25,            # asked when it didn't need to
     "under_ask": -0.25,           # drafted before asking when the request was ambiguous
     "format_issue": -0.05,        # per formatting problem (invalid call, plain-text ending, leaked reasoning...)
+    "needless_call": -0.05,       # per tool call on a request no tool can serve (capped)
 }
 
 
@@ -50,4 +53,5 @@ def compute_reward(m: dict | None, weights: dict | None = None, cap: int = 5) ->
     if not m["should_ask"] and m["asked"]:
         r += w["over_ask"]
     r += w["format_issue"] * min(m.get("format_issues", m.get("invalid_calls", 0)), cap)
+    r += w["needless_call"] * min(m.get("needless_calls", 0), 3)
     return max(-1.0, min(1.0, round(r, 4)))

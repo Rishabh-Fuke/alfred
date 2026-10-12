@@ -31,7 +31,8 @@ def _reserved(g) -> tuple[list[list[str]], list[list[str]]]:
     names = (C.FIRST_NAMES + C.LAST_NAMES + C.MOM_FIRST_NAMES + C.STRANGER_FIRST + C.STRANGER_LAST + C.STORES
              + [c for c, _ in C.CARRIERS] + [u for u, _ in C.UTILITIES] + [a for a, _, _ in C.AIRLINES]
              + [c for c, _ in C.CITIES] + C.CLINICS + C.BANKS + C.RESTAURANTS + C.VENDORS
-             + [pl for _, _, pl in C.PERSONAL_EVENTS] + [g.therapist["name"], g.doctor])
+             + [pl for _, _, pl in C.PERSONAL_EVENTS] + [g.therapist["name"], g.doctor]
+             + [f"{a} {b}" for a, b in C.UNKNOWN_PEOPLE])
     own = {g.user["first"], g.user["last"]}  # mail to the user names the user; no task searches for them
     names = [n for n in names if n not in own]
     mail = [t for t in (query_terms(n, EMAIL_STOP) for n in names) if t]

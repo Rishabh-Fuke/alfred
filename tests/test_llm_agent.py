@@ -8,7 +8,7 @@ from alfred.agents.llm import MALFORMED, OpenAICompatAgent, parse_json_tool_call
 from alfred.dev.replay_server import serve_in_thread
 from alfred.env import Environment
 from alfred.prompts import build_system_prompt
-from alfred.tasks import generate_tasks
+from alfred.tasks import TEMPLATES, generate_tasks
 from alfred.tools import TOOL_NAMES
 from alfred.world import World, human_time, parse_dt
 
@@ -100,7 +100,7 @@ def test_end_to_end_through_an_openai_compatible_server(tmp_path, mode):
     finally:
         server.shutdown()
     rows = [json.loads(line) for line in (run / "results.jsonl").read_text().splitlines()]
-    assert len(rows) == 18
+    assert len(rows) == 2 * len(TEMPLATES)
     assert all(r["metrics"]["clean_success"] for r in rows)
     assert not server.problems
     assert "Clean success" in (run / "report.md").read_text()
