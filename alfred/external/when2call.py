@@ -25,7 +25,8 @@ from urllib.request import urlopen
 
 from ..agents.llm import chat_create, strip_think
 from ..matching import INABILITY
-from .common import NO_THINK, bootstrap, client_for, pct, read_jsonl, slug
+from .common import (FINISH_STATS, HARNESS, NO_THINK, bootstrap, client_for, finish_note, offered_tools, pct, read_jsonl,
+                     read_finish_as_reply, slug)
 
 DATA_URL = "https://raw.githubusercontent.com/NVIDIA/When2Call/main/data/test/when2call_test_{subset}.jsonl"
 LABELS = ("tool_call", "request_for_info", "cannot_answer")
@@ -95,6 +96,7 @@ def respond(client, model: str, item: dict, extra_body: dict | None, temperature
     if extra_body:
         kw["extra_body"] = extra_body
     msg = chat_create(client, model, **kw).choices[0].message
+    read_finish_as_reply(msg, offered_tools(tools))
     if msg.tool_calls:
         tc = msg.tool_calls[0].function
         return {"text": json.dumps({"name": tc.name, "arguments": tc.arguments}), "tool_call": True}
@@ -161,7 +163,7 @@ def run(a) -> Path:
     client, _ = client_for(a.base_url, a.api_key, timeout=a.timeout)
     judge_client = None if a.judge == "rules" else client_for(a.judge_base_url, None, timeout=a.timeout)[0]
     label = a.label or f"{a.model}{' no-think' if a.no_think else ''}"
-    out = Path(a.out) / f"when2call-{a.subset}-{slug(label)}"
+    out = Path(a.out) / f"when2call-{a.subset}-{slug(label)}-{HARNESS}"
     out.mkdir(parents=True, exist_ok=True)
     (out / "config.json").write_text(json.dumps({**vars(a), "api_key": None}, indent=2))
     path = out / "responses.jsonl"
@@ -193,8 +195,9 @@ def run(a) -> Path:
         list(pool.map(one, todo))
     rows = [r for r in read_jsonl(path) if r["uuid"] in {i["uuid"] for i in items}]
     summary = summarize(rows)
+    summary["harness"] = {"version": HARNESS, **FINISH_STATS}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
-    text = render(label, summary)
+    text = render(label, summary) + finish_note()
     (out / "summary.md").write_text(text)
     print(text)
     return out

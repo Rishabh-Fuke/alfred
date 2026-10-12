@@ -23,7 +23,7 @@ import os
 import re
 from pathlib import Path
 
-from .common import NO_THINK, pct, slug
+from .common import FINISH_STATS, HARNESS, NO_THINK, finish_note, offered_tools, pct, read_finish_as_reply, slug
 
 CATEGORIES = ("multi_turn_base", "multi_turn_miss_param", "multi_turn_miss_func")
 NAMES = {"multi_turn_base": "Multi-turn tasks with everything available (control)",
@@ -45,7 +45,9 @@ def register(name: str, model: str, extra_body: dict | None) -> None:
                 kwargs["tools"] = tools
             if extra_body:
                 kwargs["extra_body"] = extra_body
-            return self.generate_with_backoff(**kwargs)
+            api_response, latency = self.generate_with_backoff(**kwargs)
+            read_finish_as_reply(api_response.choices[0].message, offered_tools(tools))
+            return api_response, latency
 
     MODEL_CONFIG_MAPPING[name] = ModelConfig(
         model_name=model, display_name=name, url="", org="", license="", model_handler=Handler,
@@ -78,7 +80,7 @@ def run(a) -> Path:
     # BFCL stores results under the model name with "/" turned into "_" and reverses that when scoring, so the
     # registered name must contain neither.
     name = "alfred-" + re.sub(r"[^A-Za-z0-9.-]+", "-", label).strip("-")
-    out = (Path(a.out) / f"bfcl-{slug(label)}").resolve()
+    out = (Path(a.out) / f"bfcl-{slug(label)}-{HARNESS}").resolve()
     out.mkdir(parents=True, exist_ok=True)
     (out / "config.json").write_text(json.dumps({**vars(a), "api_key": None}, indent=2))
 
@@ -100,8 +102,8 @@ def run(a) -> Path:
         cli(["evaluate", "--model", name, "--test-category", categories, "--result-dir", "result",
              "--score-dir", "score"], standalone_mode=False)
     scores = read_scores(out / "score", name)
-    (out / "summary.json").write_text(json.dumps(scores, indent=2))
-    text = render(label, scores)
+    (out / "summary.json").write_text(json.dumps({**scores, "harness": {"version": HARNESS, **FINISH_STATS}}, indent=2))
+    text = render(label, scores) + finish_note()
     (out / "summary.md").write_text(text)
     print(text)
     return out

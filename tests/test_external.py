@@ -72,3 +72,58 @@ def test_agentdojo_harness_runs_end_to_end(tmp_path):
         server.shutdown()
     s = json.loads((out / "summary.json").read_text())
     assert {"utility", "utility_under_attack", "attack_success"} <= set(s)
+
+
+# --- Alfred's finish tool on benchmarks that don't offer it
+
+def _msg(content=None, calls=()):
+    from openai.types.chat import ChatCompletionMessage
+    return ChatCompletionMessage.model_validate({
+        "role": "assistant", "content": content,
+        "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": n, "arguments": json.dumps(a)}}
+                       for i, (n, a) in enumerate(calls)] or None})
+
+
+def test_finish_call_is_read_as_the_final_reply():
+    from alfred.external.common import read_finish_as_reply
+    m = _msg(calls=[("finish", {"status": "cannot_do", "message": "I can't book flights."})])
+    assert read_finish_as_reply(m, {"search_flights"}) and m.tool_calls is None
+    assert m.content == "I can't book flights."
+    m = _msg("ok", calls=[("search", {"q": "x"}), ("finish", {"message": "done"})])
+    assert not read_finish_as_reply(m, {"search"}) and [c.function.name for c in m.tool_calls] == ["search"]
+    m = _msg(calls=[("finish", {"message": "done"})])
+    assert not read_finish_as_reply(m, {"finish"}) and m.tool_calls  # a benchmark that has finish keeps it
+    m = _msg("Sure.\n<tool_call>\n<function=finish>\n<parameter=message>\nIt's Friday.\n</parameter>\n</function>\n"
+             "</tool_call>")
+    assert read_finish_as_reply(m, set()) and m.content == "Sure.\n\nIt's Friday."
+    m = _msg("Plain answer.")
+    assert not read_finish_as_reply(m, {"x"}) and m.content == "Plain answer."
+
+
+def test_agentdojo_client_ends_an_episode_that_outgrows_the_context():
+    import httpx
+    import openai
+    from types import SimpleNamespace
+    from alfred.external.agentdojo_bench import _ExtraBodyClient
+    from alfred.external.common import FINISH_STATS
+
+    def create(**kw):
+        if kw["messages"][0]["content"] == "long":
+            raise openai.BadRequestError("This model's maximum context length is 32768 tokens.",
+                                         response=httpx.Response(400, request=httpx.Request("POST", "http://x")),
+                                         body=None)
+        from openai.types.chat import ChatCompletion
+        return ChatCompletion.model_validate({"id": "1", "object": "chat.completion", "created": 0, "model": "m",
+                                              "choices": [{"index": 0, "finish_reason": "tool_calls", "message":
+                                                           _msg(calls=[("finish", {"message": "All set."})])
+                                                           .model_dump()}]})
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    c = _ExtraBodyClient(fake, None)
+    before = dict(FINISH_STATS)
+    r = c.chat.completions.create(model="m", messages=[{"role": "user", "content": "long"}], tools=[])
+    assert r.choices[0].message.content == "" and not r.choices[0].message.tool_calls
+    r = c.chat.completions.create(model="m", messages=[{"role": "user", "content": "hi"}],
+                                  tools=[{"type": "function", "function": {"name": "send_email"}}])
+    assert r.choices[0].message.content == "All set." and not r.choices[0].message.tool_calls
+    assert FINISH_STATS["context_overflow"] == before["context_overflow"] + 1
+    assert FINISH_STATS["finish_read_as_reply"] == before["finish_read_as_reply"] + 1

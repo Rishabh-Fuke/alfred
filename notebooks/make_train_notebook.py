@@ -408,6 +408,8 @@ patterns = ['train/*.md', 'train/data/*.md', 'train/sft/log.jsonl', 'train/sft/a
             'train/grpo/audit.md', 'realism/main.jsonl.gz', 'realism/main.build.md', 'realism/check.md',
             'external/report.md', 'external/*/summary.*']
 files = [f for p in patterns for f in glob.glob(p)]
+# A few AgentDojo episodes as they happened (clean runs of the first user tasks), to see how the model ends a task.
+files += sorted(glob.glob('external/agentdojo-*/logs/**/user_task_[0-4]/none/none.json', recursive=True))[:20]
 new_runs = [d for d in glob.glob('runs/*') if any(k in d for k in ('-base-', '-sft-', '-rl-', '-tf-heldout-'))]
 files += glob.glob('train/report-*.md')
 subprocess.run(['rm', '-f', 'train-results.zip'])

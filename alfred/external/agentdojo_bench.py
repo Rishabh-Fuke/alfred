@@ -19,7 +19,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from .common import NO_THINK, bootstrap, client_for, pct, slug
+from .common import (FINISH_STATS, HARNESS, NO_THINK, bootstrap, client_for, count, finish_note, offered_tools, pct,
+                     read_finish_as_reply, slug)
 
 
 class _ExtraBodyClient:
@@ -30,9 +31,27 @@ class _ExtraBodyClient:
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, **kw):
+        import openai
         if self._extra:
             kw["extra_body"] = {**kw.get("extra_body", {}), **self._extra}
-        return self._client.chat.completions.create(**kw)
+        try:
+            resp = self._client.chat.completions.create(**kw)
+        except openai.BadRequestError as e:
+            if "context length" not in str(e):
+                raise
+            # The conversation outgrew the context window: end this episode (it scores as a failure) instead of
+            # letting AgentDojo abort the whole benchmark.
+            count("context_overflow")
+            return _reply(kw.get("model", ""), "")
+        read_finish_as_reply(resp.choices[0].message, offered_tools(kw.get("tools")))
+        return resp
+
+
+def _reply(model: str, text: str):
+    from openai.types.chat import ChatCompletion
+    return ChatCompletion.model_validate({
+        "id": "alfred-local", "object": "chat.completion", "created": 0, "model": model,
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": text}}]})
 
 
 def build_pipeline(model: str, base_url: str, api_key: str | None, no_think: bool, temperature: float, name: str):
@@ -72,7 +91,7 @@ def run(a) -> Path:
     from agentdojo.task_suite.load_suites import get_suite
 
     label = a.label or f"{a.model}{' no-think' if a.no_think else ''}"
-    out = Path(a.out) / f"agentdojo-{a.suite}-{slug(label)}"
+    out = Path(a.out) / f"agentdojo-{a.suite}-{slug(label)}-{HARNESS}"
     logdir = out / "logs"
     logdir.mkdir(parents=True, exist_ok=True)
     (out / "config.json").write_text(json.dumps({**vars(a), "api_key": None}, indent=2))
@@ -92,8 +111,9 @@ def run(a) -> Path:
                                                        user_tasks=user_tasks, injection_tasks=injection_tasks,
                                                        verbose=False, benchmark_version=a.benchmark_version)
     summary = summarize(clean, attacked)
+    summary["harness"] = {"version": HARNESS, **FINISH_STATS}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
-    text = render(label, summary, None if a.attack == "none" else a.attack)
+    text = render(label, summary, None if a.attack == "none" else a.attack) + finish_note()
     (out / "summary.md").write_text(text)
     print(text)
     return out
