@@ -5,13 +5,16 @@ import pytest
 
 pytest.importorskip("peft")
 
+from alfred.tasks import TEMPLATES  # noqa: E402
 from alfred.train import data, sft  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def dataset(tmp_path_factory):
     out = tmp_path_factory.mktemp("data") / "sft.jsonl"
-    data.main(["--oracle-worlds", "0-1", "--val-frac", "0.15", "--out", str(out)])
+    # The original nine task types: this test checks the training mechanics, and its thresholds were set on them.
+    nine = ",".join(list(TEMPLATES)[:9])
+    data.main(["--oracle-worlds", "0-1", "--val-frac", "0.15", "--templates", nine, "--out", str(out)])
     return out
 
 
