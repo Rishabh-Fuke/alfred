@@ -75,3 +75,34 @@ def test_start_load_unload_stop(fake_vllm):
         assert serve.stop(port)
     assert not serve.is_up(url)
     assert not serve.stop(port)  # nothing left to stop
+
+
+def test_start_returns_inside_a_terminal(fake_vllm):
+    """Colab runs shell commands in a terminal and waits until nothing holds it open. A server that kept the
+    terminal as its stdin made `serve start` (and the notebook cell) hang for as long as vLLM ran."""
+    import pty
+    import select
+    import socket
+    import subprocess
+    import time
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    master, slave = pty.openpty()
+    proc = subprocess.Popen([sys.executable, "-m", "alfred.train.serve", "start", "--model", "org/base",
+                             "--served-name", "base", "--port", str(port), "--log", str(fake_vllm / "v.log")],
+                            stdin=slave, stdout=slave, stderr=slave, cwd=os.path.dirname(os.path.dirname(__file__)))
+    os.close(slave)
+    try:
+        deadline, closed = time.time() + 60, False
+        while time.time() < deadline and not closed:
+            if select.select([master], [], [], 1)[0]:
+                try:
+                    closed = not os.read(master, 4096)
+                except OSError:  # every holder of the terminal closed it
+                    closed = True
+        assert closed, "the terminal stayed open after `serve start` finished"
+        assert proc.wait(5) == 0 and serve.is_up(serve.base_url(port))
+    finally:
+        os.close(master)
+        serve.stop(port)

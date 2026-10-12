@@ -102,7 +102,10 @@ def start(model: str, served_name: str, port: int = 8000, lora: bool = False, lo
     if not shutil.which("vllm"):
         raise RuntimeError("vLLM isn't installed here (pip install vllm).")
     log = open(log_path, "w")
-    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+    # stdin too: an inherited terminal (Colab's cell output is one) would stay open while vLLM runs, so whatever ran
+    # this command would wait for vLLM to exit.
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env,
+                            start_new_session=True)
     _pid_file(port).write_text(str(proc.pid))
     print("Starting:", " ".join(cmd), flush=True)
     deadline = time.time() + timeout
