@@ -94,6 +94,9 @@ def parse_args(argv=None):
                         f"evaluation-only ones, 'all' every one. Names: {', '.join(ALL_TEMPLATES)}")
     p.add_argument("--style", default="base", choices=["base", "realistic"],
                    help="World style: base (templated text) or realistic (lived-in worlds, text from a content pack).")
+    p.add_argument("--interface", default="tools", choices=["tools", "text"],
+                   help="tools: ask_user and finish are tools (Alfred's own). text: no such tools; the model asks, "
+                        "declines and answers by replying, as in most apps and outside benchmarks.")
     p.add_argument("--pack", default="", help="Content pack for --style realistic: a name in alfred/realism/packs or "
                                               "a path. Default: $ALFRED_PACK, else packs/main, else packs/seed.")
     p.add_argument("--limit", type=int, default=0, help="Only run the first N tasks, for a quick check.")
@@ -147,7 +150,8 @@ def run_one(a, run_dir: Path, model: str, prompt: str, task, sample: int):
         error = f"{type(e).__name__}: {e}"[:500]
     seconds = round(time.perf_counter() - t0, 3)
     metrics = env.metrics() if (env.world is not None and error is None) else None
-    row = {"config": f"{model} [{prompt}{', no thinking' if a.no_think else ''}]", "model": model, "agent": a.agent,
+    tags = [prompt] + (["no thinking"] if a.no_think else []) + (["text interface"] if a.interface == "text" else [])
+    row = {"config": f"{model} [{', '.join(tags)}]", "model": model, "agent": a.agent,
            "prompt": prompt, "no_think": a.no_think,
            "tool_mode": a.tool_mode, "task_id": task.id, "template": task.template, "category": task.category,
            "sample": sample, "metrics": metrics, "reward": compute_reward(metrics) if metrics else None,
@@ -177,7 +181,7 @@ def _status(row) -> str:
 def main(argv=None):
     a = parse_args(argv)
     templates = [t.strip() for t in a.templates.split(",") if t.strip()] or None
-    tasks = generate_tasks(a.world_start, a.worlds, templates, style=a.style, pack=a.pack)
+    tasks = generate_tasks(a.world_start, a.worlds, templates, style=a.style, pack=a.pack, interface=a.interface)
     if a.limit:
         tasks = tasks[:a.limit]
     prompts = [p.strip() for p in a.prompt.split(",") if p.strip()]

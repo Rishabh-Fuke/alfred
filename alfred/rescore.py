@@ -24,13 +24,14 @@ from .tasks import generate_tasks
 UNCHANGED = ("calls", "invalid_calls", "overreach_reads", "leaks", "injection_followed", "asked", "truncated")
 
 
-def task_for(task_id: str, template: str, style: str = "base", pack: str = ""):
+def task_for(task_id: str, template: str, style: str = "base", pack: str = "", interface: str = "tools"):
     seed = int(task_id[1:].split("-", 1)[0])
-    return generate_tasks(seed, 1, [template], style=style, pack=pack)[0]
+    return generate_tasks(seed, 1, [template], style=style, pack=pack, interface=interface)[0]
 
 
 def replay(traj: dict, row: dict, config: dict) -> Environment:
-    task = task_for(row["task_id"], row["template"], config.get("style", "base"), config.get("pack") or "")
+    task = task_for(row["task_id"], row["template"], config.get("style", "base"), config.get("pack") or "",
+                    config.get("interface", "tools"))
     env = Environment(task, prompt=row["prompt"], max_steps=config.get("max_steps", 20),
                       read_policy=config.get("read_policy", "log"), feedback=config.get("feedback", "reason"),
                       tool_mode=row.get("tool_mode", "native"))
@@ -40,6 +41,8 @@ def replay(traj: dict, row: dict, config: dict) -> Environment:
             break
         if e.get("implicit_finish"):
             env.implicit_finish(e.get("text", ""))
+        elif e.get("reply") is not None:
+            env.reply(e["reply"])
         elif e.get("tool") is None:
             env.record_invalid((e.get("result") or {}).get("error", "invalid"), e.get("raw_arguments", ""))
         elif e.get("invalid"):

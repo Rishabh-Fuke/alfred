@@ -231,7 +231,10 @@ class OpenAICompatAgent:
                     messages.append({"role": "user", "content": 'Error: I couldn\'t parse that. Reply with one JSON '
                                                                 'object like {"tool": "...", "arguments": {...}}.'})
                 else:
-                    env.implicit_finish(visible)
+                    # A plain reply: the final answer, or (in the text interface) a question for the user.
+                    answer = env.reply(visible)
+                    if answer is not None:
+                        messages.append({"role": "user", "content": answer})
             if env.done:
                 break
         if not env.done:

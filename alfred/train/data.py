@@ -33,7 +33,7 @@ from ..agents.llm import strip_think
 from ..agents.scripted import TeachingOracle
 from ..env import Environment
 from ..tasks import HELDOUT_TEMPLATES, TEMPLATES, TRAIN_WORLDS, generate_tasks
-from ..tools import TOOL_SCHEMAS
+from ..tools import schemas_for
 
 TRAINING_TEMPLATES = list(TEMPLATES)  # held-out templates (tasks.HELDOUT_TEMPLATES) are for evaluation only
 
@@ -103,6 +103,7 @@ def conversation_from_trajectory(traj: dict) -> list[dict]:
     """A teacher's messages, cleaned for training (see the module docstring)."""
     out = []
     msgs = traj["messages"]
+    text_interface = traj["task"].get("interface", "tools") == "text"
     last_assistant = max(i for i, m in enumerate(msgs) if m["role"] == "assistant")
     for i, m in enumerate(msgs[:last_assistant + 1]):
         role = m["role"]
@@ -119,6 +120,9 @@ def conversation_from_trajectory(traj: dict) -> list[dict]:
                 calls.append({"id": tc.get("id") or f"call_{i}_{k}", "type": "function",
                               "function": {"name": fn["name"], "arguments": args}})
             out.append({"role": "assistant", "content": "", "tool_calls": calls})
+        elif text_interface:
+            # In the text interface a plain reply is how the assistant asks, declines or answers.
+            out.append({"role": "assistant", "content": strip_think(m.get("content"))})
         else:
             if i != last_assistant:
                 raise ValueError("plain-text assistant message before the end")
@@ -135,6 +139,12 @@ def conversation_from_env(env) -> list[dict]:
     """An episode driven by a scripted agent (which calls the environment directly), as a conversation."""
     out = [{"role": "system", "content": env.system_prompt}, {"role": "user", "content": env.task.instruction}]
     for n, e in enumerate(env.log, 1):
+        if e.get("reply") is not None:  # text interface: a question for the user, or the final answer
+            out.append({"role": "assistant", "content": e["reply"]})
+            if e["answer"] is None:
+                break
+            out.append({"role": "user", "content": e["answer"]})
+            continue
         if not e.get("tool") or e.get("invalid"):
             raise ValueError("scripted episodes should only make valid calls")
         cid = f"call_{n}"
@@ -150,7 +160,8 @@ def example(source: str, task: dict, messages: list[dict], metrics: dict, sample
     return {"id": f"{source}:{task['id']}:s{sample}", "source": source, "task_id": task["id"],
             "template": task["template"], "category": task["category"], "world_seed": task["world_seed"],
             "world_style": task.get("world_style", "base"),
-            "messages": messages, "train": train_flags(messages), "tools": TOOL_SCHEMAS,
+            "interface": task.get("interface", "tools"),
+            "messages": messages, "train": train_flags(messages), "tools": schemas_for(task.get("interface", "tools")),
             "metrics": {k: metrics.get(k) for k in ("clean_success", "calls", "first_try_approval", "asked")}}
 
 
@@ -183,15 +194,22 @@ def load_teacher(run_dirs: list[Path], max_per_task: int = 1) -> tuple[list[dict
     return out, why
 
 
+def text_interface_for(task_id: str, share: float) -> bool:
+    """Whether a training task is played in the text interface: a fixed share, decided by the task id."""
+    return share > 0 and random.Random(f"interface:{task_id}").random() < share
+
+
 def oracle_examples(worlds: range, templates: list[str], prompt: str = "plain", realistic_share: float = 0.0,
-                    pack: str = "") -> list[dict]:
-    """Scripted episodes. realistic_share of the worlds (the last ones in the range) are realistic."""
+                    pack: str = "", text_share: float = 0.0) -> list[dict]:
+    """Scripted episodes. realistic_share of the worlds (the last ones in the range) are realistic; text_share of
+    the tasks use the text interface (no ask_user or finish tool)."""
     _check_templates(templates)
     out = []
     n_real = round(len(worlds) * realistic_share)
     split = worlds.start + len(worlds) - n_real
     tasks = generate_tasks(worlds.start, split - worlds.start, templates) if split > worlds.start else []
     tasks += generate_tasks(split, n_real, templates, style="realistic", pack=pack) if n_real else []
+    tasks = [t.as_interface("text") if text_interface_for(t.id, text_share) else t for t in tasks]
     for task in tasks:
         if task.world_seed not in TRAIN_WORLDS:
             raise ValueError(f"world {task.world_seed} isn't a training world")
@@ -267,6 +285,8 @@ def main(argv=None):
     p.add_argument("--realistic-share", type=float, default=0.0,
                    help="Share of the scripted worlds that are realistic (teacher episodes keep their own style).")
     p.add_argument("--pack", default="", help="Content pack for realistic worlds.")
+    p.add_argument("--text-share", type=float, default=0.0,
+                   help="Share of the scripted tasks in the text interface (no ask_user or finish tool).")
     p.add_argument("--per-template", type=int, default=0,
                    help="Examples per template (default: the largest teacher count).")
     p.add_argument("--oracle-min", type=float, default=0.15,
@@ -281,7 +301,7 @@ def main(argv=None):
     teacher, why = load_teacher([Path(r) for r in a.runs], a.max_per_task)
     teacher = [ex for ex in teacher if ex["template"] in templates]
     oracle = (oracle_examples(_parse_world_range(a.oracle_worlds), templates, realistic_share=a.realistic_share,
-                              pack=a.pack) if a.oracle_worlds else [])
+                              pack=a.pack, text_share=a.text_share) if a.oracle_worlds else [])
     examples = balance(teacher, oracle, a.per_template or None, a.oracle_min, a.seed)
     train, val = split_validation(examples, a.val_frac)
 

@@ -93,6 +93,17 @@ _TOOLS = [
 TIERS = {t["function"]["name"]: t["tier"] for t in _TOOLS}
 TOOL_SCHEMAS = [{"type": "function", "function": t["function"]} for t in _TOOLS]  # OpenAI format
 TOOL_NAMES = [t["function"]["name"] for t in TOOL_SCHEMAS]
+# Alfred's two conversation tools. In the plain-text interface (most apps and benchmarks work this way) they aren't
+# offered: the agent asks the user, declines or gives its final answer by simply replying.
+TALK_TOOLS = ("ask_user", "finish")
+INTERFACES = ("tools", "text")
+
+
+def schemas_for(interface: str = "tools") -> list[dict]:
+    if interface not in INTERFACES:
+        raise ValueError(f"unknown interface {interface!r}; use one of {INTERFACES}")
+    return TOOL_SCHEMAS if interface == "tools" else [t for t in TOOL_SCHEMAS
+                                                       if t["function"]["name"] not in TALK_TOOLS]
 _SPECS = {t["function"]["name"]: t["function"] for t in TOOL_SCHEMAS}
 
 _ENUM_SYNONYMS = {"complete": "done", "completed": "done", "success": "done", "finished": "done",

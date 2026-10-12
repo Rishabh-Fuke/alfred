@@ -42,7 +42,8 @@ from pathlib import Path
 import torch
 
 from ..tasks import HELDOUT_TEMPLATES, TEMPLATES, TRAIN_WORLDS, VALIDATION_WORLDS, generate_tasks
-from ..tools import TOOL_SCHEMAS
+from ..tools import schemas_for
+from .data import text_interface_for
 from . import serve
 from .model import (Schedule, load_checkpoint, load_lora, load_model, load_tokenizer, save_checkpoint, token_logprobs,
                     trainable_parameters)
@@ -50,21 +51,24 @@ from .render import TemplateMismatch, render
 from .rollout import Episode, make_client, play_many
 
 
-def validation_tasks(n_worlds: int, realistic_share: float, pack: str = "") -> list:
-    """Validation in the same mix as training: the first worlds base, the rest realistic (with eval-split text)."""
+def validation_tasks(n_worlds: int, realistic_share: float, pack: str = "", templates=None,
+                     text_share: float = 0.0) -> list:
+    """Validation in the same mix as training: the first worlds base, the rest realistic (with eval-split text),
+    and text_share of the tasks in the text interface."""
     n_real = round(n_worlds * realistic_share)
     start = VALIDATION_WORLDS.start
-    return (generate_tasks(start, n_worlds - n_real) if n_worlds - n_real else []) + \
-        (generate_tasks(start + n_worlds - n_real, n_real, style="realistic", pack=pack) if n_real else [])
+    tasks = (generate_tasks(start, n_worlds - n_real, templates) if n_worlds - n_real else []) + \
+        (generate_tasks(start + n_worlds - n_real, n_real, templates, style="realistic", pack=pack) if n_real else [])
+    return [t.as_interface("text") if text_interface_for(t.id, text_share) else t for t in tasks]
 
 
 class TaskSampler:
     """Draws training tasks, favoring templates the policy solves only sometimes."""
 
     def __init__(self, templates: list[str], worlds: range, seed: int = 0, floor: float = 0.1,
-                 realistic_share: float = 0.0, pack: str = ""):
+                 realistic_share: float = 0.0, pack: str = "", text_share: float = 0.0):
         self.templates, self.worlds, self.floor = list(templates), worlds, floor
-        self.realistic_share, self.pack = realistic_share, pack
+        self.realistic_share, self.pack, self.text_share = realistic_share, pack, text_share
         self.rng = random.Random(seed)
         self.solve_rate = {t: 0.5 for t in self.templates}
 
@@ -82,7 +86,8 @@ class TaskSampler:
                     seen.add((seed, tpl))
                     break
             style = "realistic" if self.rng.random() < self.realistic_share else "base"
-            tasks.append(generate_tasks(seed, 1, [tpl], style=style, pack=self.pack)[0])
+            interface = "text" if self.rng.random() < self.text_share else "tools"
+            tasks.append(generate_tasks(seed, 1, [tpl], style=style, pack=self.pack, interface=interface)[0])
         return tasks
 
     def update(self, template: str, solve_rate: float, momentum: float = 0.7) -> None:
@@ -198,6 +203,9 @@ def parse_args(argv=None):
                    help="Share of training tasks in realistic worlds (the rest use base worlds).")
     p.add_argument("--pack", default="", help="Content pack for realistic worlds (default: $ALFRED_PACK, packs/main, "
                                               "packs/seed).")
+    p.add_argument("--text-share", type=float, default=0.5,
+                   help="Share of training tasks in the text interface (no ask_user or finish tool: the model asks, "
+                        "declines and answers by replying, as in most apps and outside benchmarks).")
     p.add_argument("--temperature", type=float, default=0.9)
     p.add_argument("--top-p", type=float, default=1.0)
     p.add_argument("--max-steps", type=int, default=12, help="Model turns per episode.")
@@ -241,9 +249,10 @@ class Trainer:
         templates = [t.strip() for t in a.templates.split(",") if t.strip()]
         if set(templates) & set(HELDOUT_TEMPLATES):
             raise ValueError("held-out templates are for evaluation only")
-        self.sampler = TaskSampler(templates, worlds, a.seed, realistic_share=a.realistic_share, pack=a.pack)
+        self.sampler = TaskSampler(templates, worlds, a.seed, realistic_share=a.realistic_share, pack=a.pack,
+                                   text_share=a.text_share)
         self.step, self.best_val, self.policy = 0, None, None
-        self.val_tasks = validation_tasks(a.val_worlds, a.realistic_share, a.pack)
+        self.val_tasks = validation_tasks(a.val_worlds, a.realistic_share, a.pack, templates, a.text_share)
 
     # --- serving the policy -------------------------------------------------------------------------------------
 
@@ -279,7 +288,7 @@ class Trainer:
             if not ep.ok or abs(ep.advantage) < 1e-9:
                 continue
             try:
-                r = render(self.tok, conversation(ep), TOOL_SCHEMAS, max_len=self.a.max_len)
+                r = render(self.tok, conversation(ep), schemas_for(ep.task.interface), max_len=self.a.max_len)
             except (TemplateMismatch, ValueError, KeyError):
                 continue
             if r is not None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import random
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 
 from . import content as C
@@ -74,9 +74,17 @@ class Task:
     world_style: str = "base"               # "base" or "realistic" (world.STYLES)
     pack: str = ""                          # content pack name or path for realistic worlds ("" means the default)
     pack_id: str = ""                       # the pack's id when the task was made, so a changed pack is caught
+    interface: str = "tools"                # "tools": ask_user and finish are tools; "text": the agent just replies
 
     def to_json(self) -> dict:
         return to_jsonable({k: getattr(self, k) for k in self.__dataclass_fields__})
+
+    def as_interface(self, interface: str) -> "Task":
+        """The same task in the other interface (only how the agent asks and finishes differs)."""
+        if interface == self.interface:
+            return self
+        base = self.id[:-2] if self.id.endswith("-t") else self.id
+        return replace(self, interface=interface, id=base + ("-t" if interface == "text" else ""))
 
 
 def _day(w: World, offset: int) -> date:
@@ -585,10 +593,14 @@ def template_names(spec: str | list[str] | None) -> list[str]:
 
 
 def generate_tasks(world_start: int = 1000, n_worlds: int = 5, templates: list[str] | str | None = None,
-                   style: str = "base", pack: str = "") -> list[Task]:
+                   style: str = "base", pack: str = "", interface: str = "tools") -> list[Task]:
     """One task per template per world. Worlds 0-949 are for training, 950-999 for validation and 1000+ for
     evaluation. Held-out templates (HELDOUT_TEMPLATES) are for evaluation only. style "realistic" builds the
-    same tasks in lived-in worlds with text from a content pack (pack: name or path; "" means the default)."""
+    same tasks in lived-in worlds with text from a content pack (pack: name or path; "" means the default).
+    interface "text" offers no ask_user or finish tool: the agent asks, declines or answers by replying, the way
+    most apps and outside benchmarks work. The tasks and their grading are otherwise identical."""
+    if interface not in ("tools", "text"):
+        raise ValueError(f"unknown interface {interface!r}")
     names = template_names(templates)
     unknown = set(names) - set(ALL_TEMPLATES)
     if unknown:
@@ -605,7 +617,7 @@ def generate_tasks(world_start: int = 1000, n_worlds: int = 5, templates: list[s
             kw["attacker_addresses"] = frozenset(kw.get("attacker_addresses", ()))
             kw["world_extras"] = tuple(kw.get("world_extras", ()))
             w = worlds[extras]
-            tid = f"w{seed}-{name}" + ("-r" if style == "realistic" else "")
+            tid = f"w{seed}-{name}" + ("-r" if style == "realistic" else "") + ("-t" if interface == "text" else "")
             tasks.append(Task(id=tid, template=name, world_seed=seed, world_style=style, pack=pack,
-                              pack_id=w.pack_id, **kw))
+                              pack_id=w.pack_id, interface=interface, **kw))
     return tasks

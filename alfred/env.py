@@ -11,11 +11,13 @@ Any agent loop can drive it: an LLM (agents/llm.py), a script (agents/scripted.p
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from . import tools as T
 from .checker import score
 from .gate import Gate
+from .matching import INABILITY
 from .prompts import build_system_prompt
 from .tasks import Task
 from .user_sim import SimulatedUser
@@ -27,6 +29,22 @@ class Observation:
     system: str
     instruction: str
     tools: list[dict]
+
+
+# A reply that ends in a question is the agent asking the user something, unless it's a closing offer after the
+# answer ("It's at 3 PM. Want me to set a reminder?") or comes with a decline.
+_OFFER = re.compile(r"\b(?:anything else|something else|want me to|would you like me to|shall i|should i also|"
+                    r"do you want me to|let me know if|happy to help|need anything)\b", re.I)
+
+
+def is_question(text: str) -> bool:
+    t = (text or "").strip()
+    if not t.endswith("?") or INABILITY.search(t):
+        return False
+    sentences = [x for x in re.split(r"(?<=[.!?])\s+", t) if x.strip()]
+    if len(sentences) > 1 and _OFFER.search(sentences[-1]) and any(not x.endswith("?") for x in sentences[:-1]):
+        return False
+    return True
 
 
 def _dump(obj) -> str:
@@ -68,8 +86,10 @@ class Environment:
         self.tool_errors = 0
         self.blocked_reads = 0
         self.format_notes: list[str] = []  # reported by the agent loop, e.g. a call it had to recover from text
-        self.system_prompt = build_system_prompt(self.world, self.prompt, self.tool_mode)
-        return Observation(self.system_prompt, self.task.instruction, T.TOOL_SCHEMAS)
+        self.interface = getattr(t, "interface", "tools")
+        self.tools = T.schemas_for(self.interface)
+        self.system_prompt = build_system_prompt(self.world, self.prompt, self.tool_mode, self.interface)
+        return Observation(self.system_prompt, self.task.instruction, self.tools)
 
     def call_tool(self, name: str, arguments) -> str:
         """Run one tool call. Never raises for agent mistakes; errors come back as {"error": ...}."""
@@ -80,6 +100,9 @@ class Environment:
         self.calls += 1
         entry = {"i": self.calls, "tool": name}
         try:
+            if self.interface == "text" and name in T.TALK_TOOLS:  # not offered here, like any unknown tool
+                raise T.InvalidCall(f"Unknown tool '{name}'. Available tools: "
+                                    f"{', '.join(t['function']['name'] for t in self.tools)}.")
             args = T.validate(name, T.parse_arguments(arguments))
         except T.InvalidCall as e:
             self.invalid_calls += 1
@@ -112,6 +135,24 @@ class Environment:
         """For agent loops: record a formatting problem the environment can't see, like a tool call that had
         to be recovered from plain text."""
         self.format_notes.append(kind)
+
+    def reply(self, text: str) -> str | None:
+        """The agent replied in plain text. In the tools interface that ends the episode (it should have called
+        finish). In the text interface it's how the agent talks to the user: a question gets the user's answer
+        back (returned), anything else is its final answer (returns None)."""
+        if self.done:
+            return None
+        if self.interface != "text":
+            self.implicit_finish(text)
+            return None
+        if is_question(text):
+            answer = self.ask(text.strip())
+            self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": answer})
+            return answer
+        self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": None})
+        self.finish_info = {"status": "unspecified", "message": text or "", "implicit": False, "via": "reply"}
+        self.done = True
+        return None
 
     def implicit_finish(self, text: str) -> None:
         """The agent replied in plain text instead of calling a tool. Treat that as its final answer."""

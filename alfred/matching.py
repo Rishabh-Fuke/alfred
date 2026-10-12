@@ -89,7 +89,8 @@ def hedged(text: str) -> bool:
 INABILITY = re.compile(
     r"\b(can['’]?t|cannot|can not|unable|not able|no way to|"
     r"(?:do not|don['’]?t) have (?:a |the |any )?(?:way|ability|capability|capabilities|tools?|access|option|means)|"
-    r"not something i can|isn['’]?t something i can|(?:is )?not possible|isn['’]?t possible|not capable|"
+    r"not something i can|(?:isn|aren)['’]?t (?:something|anything) i can|not something i['’]?m able|"
+    r"(?:is )?not possible|isn['’]?t possible|not capable|"
     r"beyond (?:my|what i)|outside (?:of )?(?:my|what i)|no (?:tool|ability|capability|option) to)\b", re.I)
 
 # Visible reasoning or chat-template debris in text meant for a person (a draft or the final message).
