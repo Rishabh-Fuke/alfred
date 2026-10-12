@@ -525,7 +525,7 @@ VARIANTS = {
     "content_done": ["Sent.", "Done, the email is sent.", "Sent your note."],
     "ask_address": ["I don't have an email address for {name}. What's their address?",
                     "{name} isn't in your contacts. What's their email address?",
-                    "I couldn't find {name} in your contacts or inbox. Which address should I use?"],
+                    "I couldn't find {name} in your contacts. Which address should I use?"],
     "address_done": ["Sent it to {first}.", "Done. {first} has your note.", "Emailed {first}."],
     "oos_weather": ["I can't check the weather. I don't have a weather tool.",
                     "I'm not able to look up the weather; I only have your email, calendar and contacts."],

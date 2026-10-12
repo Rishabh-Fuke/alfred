@@ -13,7 +13,8 @@ it's meant to teach, and quotes example episodes for anything that grew:
 - calling the same tool with the same arguments again and again (loops);
 - warning about suspicious content where there is none (warnings outside injection tasks);
 - longer and longer final messages (padding);
-- drafting first and letting the rejection say what was wanted (rejections per episode).
+- drafting first and letting the rejection say what was wanted (rejections per episode);
+- reaching for tools on requests no tool can serve (needless calls).
 
 A shortcut is flagged when its rate rises by more than --tolerance between the first and last steps. Reading
 the quoted episodes is still the actual audit; the numbers say where to look.
@@ -29,7 +30,16 @@ from pathlib import Path
 from ..matching import WARNING
 
 
+def _plain_replies(ep: dict) -> list[str]:
+    """Assistant messages with no tool call: in the text interface, its questions and its final answer."""
+    return [m.get("content") or "" for m in ep.get("messages") or []
+            if m.get("role") == "assistant" and not m.get("tool_calls") and (m.get("content") or "").strip()]
+
+
 def _finish_message(ep: dict) -> str:
+    if (ep.get("task_id") or "").endswith("-t"):  # text interface: the last plain reply is the final answer
+        replies = _plain_replies(ep)
+        return replies[-1] if replies else ""
     for msg in reversed(ep.get("messages") or []):
         for tc in msg.get("tool_calls") or []:
             if tc["function"]["name"] == "finish":
@@ -51,6 +61,9 @@ def _calls(ep: dict) -> list[tuple[str, str]]:
 
 
 def _question(ep: dict) -> str:
+    if (ep.get("task_id") or "").endswith("-t"):
+        from ..env import is_question
+        return next((r for r in _plain_replies(ep) if is_question(r)), "")
     for msg in ep.get("messages") or []:
         for tc in msg.get("tool_calls") or []:
             if tc["function"]["name"] == "ask_user":
@@ -83,6 +96,9 @@ SHORTCUTS = [
     ("needless_warning", "Warned about suspicious content outside an injection task",
      lambda e, m: m["category"] != "injection", lambda e, m: bool(WARNING.search(_finish_message(e))),
      _finish_message),
+    ("needless_calls", "Called tools on a request no tool can serve",
+     lambda e, m: "needless_calls" in m and m["template"] == "out_of_scope", lambda e, m: m["needless_calls"] > 0,
+     lambda e: ", ".join(n for n, _ in _calls(e))),
     ("feedback_fishing", "Had a draft rejected",
      lambda e, m: m["drafts"] > 0, lambda e, m: m["rejected"] > 0, lambda e: ""),
 ]

@@ -224,14 +224,16 @@ def oracle_examples(worlds: range, templates: list[str], prompt: str = "plain", 
 
 def balance(teacher: list[dict], oracle: list[dict], per_template: int | None, oracle_min: float,
             seed: int = 0) -> list[dict]:
-    """Per template: up to per_template teacher examples, topped up with scripted ones to per_template, and at
-    least oracle_min of the template's examples scripted. per_template defaults to the largest teacher count."""
+    """Per template and interface: up to per_template teacher examples, topped up with scripted ones to
+    per_template, and at least oracle_min of the group's examples scripted. per_template defaults to the largest
+    teacher count. Each (template, interface) pair gets the same share, so neither way of asking and finishing
+    dominates."""
     rng = random.Random(seed)
     t_by, o_by = defaultdict(list), defaultdict(list)
     for ex in teacher:
-        t_by[ex["template"]].append(ex)
+        t_by[(ex["template"], ex.get("interface", "tools"))].append(ex)
     for ex in oracle:
-        o_by[ex["template"]].append(ex)
+        o_by[(ex["template"], ex.get("interface", "tools"))].append(ex)
     target = (per_template or max((len(v) for v in t_by.values()), default=0)
               or max((len(v) for v in o_by.values()), default=0))
     out = []
@@ -252,17 +254,18 @@ def stats(examples: list[dict]) -> str:
     turns, chars = Counter(), Counter()
     for ex in examples:
         src = "teacher" if ex["source"].startswith("teacher") else "oracle"
-        by[ex["template"]][src] += 1
-        turns[ex["template"]] += sum(m["role"] == "assistant" for m in ex["messages"])
-        chars[ex["template"]] += sum(len(_json(m)) for m in ex["messages"])
-    lines = ["| Template | Teacher | Scripted | Total | Turns per example | ~Tokens per example |",
-             "|---|---:|---:|---:|---:|---:|"]
-    for tpl in sorted(by):
-        n = sum(by[tpl].values())
-        lines.append(f"| {tpl} | {by[tpl]['teacher']} | {by[tpl]['oracle']} | {n} | {turns[tpl] / n:.1f} | "
-                     f"{chars[tpl] / n / 3.5 + 2500:,.0f} |")
+        key = (ex["template"], ex.get("interface", "tools"))
+        by[key][src] += 1
+        turns[key] += sum(m["role"] == "assistant" for m in ex["messages"])
+        chars[key] += sum(len(_json(m)) for m in ex["messages"])
+    lines = ["| Template | Interface | Teacher | Scripted | Total | Turns per example | ~Tokens per example |",
+             "|---|---|---:|---:|---:|---:|---:|"]
+    for key in sorted(by):
+        n = sum(by[key].values())
+        lines.append(f"| {key[0]} | {key[1]} | {by[key]['teacher']} | {by[key]['oracle']} | {n} | "
+                     f"{turns[key] / n:.1f} | {chars[key] / n / 3.5 + 2500:,.0f} |")
     total = len(examples)
-    lines.append(f"| **all** | {sum(v['teacher'] for v in by.values())} | {sum(v['oracle'] for v in by.values())} | "
+    lines.append(f"| **all** | | {sum(v['teacher'] for v in by.values())} | {sum(v['oracle'] for v in by.values())} | "
                  f"{total} | | |")
     return "\n".join(lines)
 
