@@ -20,6 +20,7 @@ STYLES = ("base", "realistic")
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
           "September", "October", "November", "December"]
+_ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 SCHEMA = """
 CREATE TABLE contacts (
@@ -196,6 +197,21 @@ class World:
         names = {c["email"]: c["name"] for c in self.contacts()}
         names[self.user["email"]] = self.user["name"]
         return names
+
+    def known_addresses(self) -> set[str]:
+        """Every address the user's data holds: contacts, the user, senders and recipients, event attendees, and any
+        address written in a message, event or contact. An address outside this set was made up."""
+        found = {a.lower() for a in self.names_by_email()}
+        texts = []
+        for e in self.emails():
+            found |= {a.lower() for a in [e["sender"], *e["recipients"], *(e.get("cc") or [])]}
+            texts.append(e["body"])
+        for ev in self.events():
+            found |= {a.lower() for a in ev["attendees"]}
+            texts += [ev.get("notes") or "", ev.get("location") or ""]
+        texts += [" ".join(str(v) for v in c.values()) for c in self.contacts()]
+        found |= {a.lower() for a in _ADDRESS.findall("\n".join(texts))}
+        return found
 
     # --- search (what the agent's tools call) -------------------------------------------
 
