@@ -41,8 +41,8 @@ from pathlib import Path
 
 import torch
 
-from ..tasks import HELDOUT_TEMPLATES, TEMPLATES, TRAIN_WORLDS, VALIDATION_WORLDS, generate_tasks
-from ..tools import schemas_for
+from ..env import task_tools
+from ..tasks import EVAL_ONLY_TEMPLATES, TEMPLATES, TRAIN_WORLDS, VALIDATION_WORLDS, generate_tasks
 from .data import text_interface_for
 from . import serve
 from .model import (Schedule, load_checkpoint, load_lora, load_model, load_tokenizer, save_checkpoint, token_logprobs,
@@ -250,7 +250,7 @@ class Trainer:
         if worlds.start < TRAIN_WORLDS.start or worlds.stop > TRAIN_WORLDS.stop:
             raise ValueError(f"--train-worlds must stay inside {TRAIN_WORLDS.start}-{TRAIN_WORLDS.stop - 1}")
         templates = [t.strip() for t in a.templates.split(",") if t.strip()]
-        if set(templates) & set(HELDOUT_TEMPLATES):
+        if set(templates) & set(EVAL_ONLY_TEMPLATES):
             raise ValueError("held-out templates are for evaluation only")
         self.sampler = TaskSampler(templates, worlds, a.seed, realistic_share=a.realistic_share, pack=a.pack,
                                    text_share=a.text_share)
@@ -291,7 +291,7 @@ class Trainer:
             if not ep.ok or abs(ep.advantage) < 1e-9:
                 continue
             try:
-                r = render(self.tok, conversation(ep), schemas_for(ep.task.interface), max_len=self.a.max_len)
+                r = render(self.tok, conversation(ep), task_tools(ep.task), max_len=self.a.max_len)
             except (TemplateMismatch, ValueError, KeyError):
                 continue
             if r is not None:

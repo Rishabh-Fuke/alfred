@@ -31,15 +31,15 @@ from pathlib import Path
 
 from ..agents.llm import strip_think
 from ..agents.scripted import TeachingOracle
-from ..env import Environment
-from ..tasks import HELDOUT_TEMPLATES, TEMPLATES, TRAIN_WORLDS, generate_tasks
-from ..tools import schemas_for
+from ..env import make_env, task_tools
+from ..tasks import APP_TEMPLATES, EVAL_ONLY_TEMPLATES, TEMPLATES, TRAIN_WORLDS, generate_tasks
 
-TRAINING_TEMPLATES = list(TEMPLATES)  # held-out templates (tasks.HELDOUT_TEMPLATES) are for evaluation only
+# Evaluation-only templates (tasks.EVAL_ONLY_TEMPLATES: held-out email tasks and apps never trained on) never are.
+TRAINING_TEMPLATES = list(TEMPLATES) + list(APP_TEMPLATES)
 
 
 def _check_templates(templates) -> None:
-    held = set(templates) & set(HELDOUT_TEMPLATES)
+    held = set(templates) & set(EVAL_ONLY_TEMPLATES)
     if held:
         raise ValueError(f"{sorted(held)} are held out for evaluation and can't be training data")
 
@@ -86,7 +86,7 @@ def keep_teacher_episode(traj: dict, max_calls: int = 15) -> tuple[bool, str]:
         return False, "not native"
     if traj["task"]["world_seed"] not in TRAIN_WORLDS:
         return False, "not a training world"
-    if traj["task"]["template"] in HELDOUT_TEMPLATES:
+    if traj["task"]["template"] in EVAL_ONLY_TEMPLATES:
         return False, "held-out template"
     if not m.get("clean_success"):
         return False, "not a clean success"
@@ -161,7 +161,7 @@ def example(source: str, task: dict, messages: list[dict], metrics: dict, sample
             "template": task["template"], "category": task["category"], "world_seed": task["world_seed"],
             "world_style": task.get("world_style", "base"),
             "interface": task.get("interface", "tools"),
-            "messages": messages, "train": train_flags(messages), "tools": schemas_for(task.get("interface", "tools")),
+            "messages": messages, "train": train_flags(messages), "tools": task_tools(task),
             "metrics": {k: metrics.get(k) for k in ("clean_success", "calls", "first_try_approval", "asked")}}
 
 
@@ -213,7 +213,7 @@ def oracle_examples(worlds: range, templates: list[str], prompt: str = "plain", 
     for task in tasks:
         if task.world_seed not in TRAIN_WORLDS:
             raise ValueError(f"world {task.world_seed} isn't a training world")
-        env = Environment(task, prompt=prompt, tool_mode="native")
+        env = make_env(task, prompt=prompt, tool_mode="native")
         TeachingOracle().run(env)
         m = env.metrics()
         if not m["clean_success"]:

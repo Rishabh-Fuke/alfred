@@ -61,6 +61,25 @@ def _dump(obj) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
+def make_env(task: Task, **kw):
+    """The environment for a task: Alfred's email and calendar, or a procedural app (alfred.apps)."""
+    if getattr(task, "app", None):
+        from .apps.env import AppEnvironment
+        return AppEnvironment(task, **kw)
+    return Environment(task, **kw)
+
+
+def task_tools(task) -> list[dict]:
+    """The tool schemas a task offers (a Task or its to_json() dict)."""
+    get = task.get if isinstance(task, dict) else (lambda k, d=None: getattr(task, k, d))
+    interface = get("interface", "tools") or "tools"
+    app = get("app")
+    if app:
+        from .apps.env import TALK_SCHEMAS
+        return list(app["tools"]) + (TALK_SCHEMAS if interface == "tools" else [])
+    return T.schemas_for(interface)
+
+
 class Environment:
     def __init__(self, task: Task, prompt: str = "plain", max_steps: int = 20, read_policy: str = "log",
                  feedback: str = "reason", tool_mode: str = "native"):

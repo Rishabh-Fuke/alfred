@@ -106,8 +106,11 @@ def test_end_to_end_from_a_teacher_run(tmp_path):
     train = [json.loads(x) for x in out.read_text().splitlines()]
     val = [json.loads(x) for x in out.with_suffix(".val.jsonl").read_text().splitlines()]
     rows = train + val
-    assert len(rows) == 3 * len(TEMPLATES)  # 3 per template: 2 from the teacher, topped up with 1 scripted
+    # 3 per training template: Alfred's own get 2 from the teacher topped up with 1 scripted (the replay teacher only
+    # ran Alfred's tasks); the procedural app templates are all scripted.
+    assert len(rows) == 3 * len(data.TRAINING_TEMPLATES)
     assert sum(r["source"] == "teacher:replay" for r in rows) == 2 * len(TEMPLATES)
+    assert {r["template"] for r in rows} == set(data.TRAINING_TEMPLATES)
     assert {r["task_id"] for r in train}.isdisjoint({r["task_id"] for r in val})
     for r in rows:
         assert r["world_seed"] in TRAIN_WORLDS and r["tools"] and len(r["train"]) >= 1

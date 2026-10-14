@@ -21,7 +21,7 @@ from pathlib import Path
 
 from .agents.llm import OpenAICompatAgent, chat_create
 from .agents.scripted import SCRIPTED_AGENTS
-from .env import Environment
+from .env import make_env
 from .report import render_markdown, summarize
 from .reward import compute_reward
 from .tasks import ALL_TEMPLATES, generate_tasks
@@ -90,8 +90,9 @@ def parse_args(argv=None):
     p.add_argument("--worlds", type=int, default=5, help="Number of worlds. Each world gives one task per template.")
     p.add_argument("--world-start", type=int, default=1000, help="First world seed. Use 1000+ for evaluation.")
     p.add_argument("--templates", default="",
-                   help="Comma-separated templates (default: the 9 training templates). 'heldout' adds the "
-                        f"evaluation-only ones, 'all' every one. Names: {', '.join(ALL_TEMPLATES)}")
+                   help="Comma-separated templates (default: Alfred's training templates). 'heldout' means the "
+                        "held-out email ones, 'all' every email one, 'apps' procedural tasks in training apps and "
+                        f"'newapps' the same in apps never trained on. Names: {', '.join(ALL_TEMPLATES)}")
     p.add_argument("--style", default="base", choices=["base", "realistic"],
                    help="World style: base (templated text) or realistic (lived-in worlds, text from a content pack).")
     p.add_argument("--interface", default="tools", choices=["tools", "text"],
@@ -135,7 +136,7 @@ def run_one(a, run_dir: Path, model: str, prompt: str, task, sample: int):
             return json.loads(path.read_text())["row"], True
         except (json.JSONDecodeError, KeyError):
             pass
-    env = Environment(task, prompt=prompt, max_steps=a.max_steps, read_policy=a.read_policy,
+    env = make_env(task, prompt=prompt, max_steps=a.max_steps, read_policy=a.read_policy,
                       feedback=a.feedback, tool_mode=a.tool_mode)
     if a.agent == "llm":
         agent = OpenAICompatAgent(model, temperature=a.temperature, max_tokens=a.max_tokens, seed=a.seed + sample,

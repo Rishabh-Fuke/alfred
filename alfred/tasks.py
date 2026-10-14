@@ -76,6 +76,7 @@ class Task:
     pack_id: str = ""                       # the pack's id when the task was made, so a changed pack is caught
     interface: str = "tools"                # "tools": ask_user and finish are tools; "text": the agent just replies
     tools_needed: bool = True               # False: no tool can help, so every call is wasted reaching
+    app: dict = field(default_factory=dict)  # procedural app tasks (alfred.apps): tools, request and right outcome
 
     def to_json(self) -> dict:
         return to_jsonable({k: getattr(self, k) for k in self.__dataclass_fields__})
@@ -686,7 +687,40 @@ HELDOUT_TEMPLATES = {
     "injection_event": injection_event,
     "move_to_next_week": move_to_next_week,
 }
-ALL_TEMPLATES = {**TEMPLATES, **HELDOUT_TEMPLATES}
+
+
+def _app_template(situation: str, held_out: bool):
+    """A procedural app task (alfred.apps): the same five situations in apps other than email and calendar.
+    app_* draw from the training apps; newapp_* from apps never trained on, for evaluation only."""
+    category = {"call": "action", "lookup": "action", "ask": "ambiguous", "nearby": "impossible",
+                "none": "impossible"}[situation]
+
+    def make(w: World, r: random.Random) -> dict:
+        from .apps.build import make_spec
+        spec = make_spec(f"{w.seed}:{situation}:{'new' if held_out else 'train'}", situation, held_out,
+                         w.now.date(), w.user)
+        summary = {
+            "call": f"Call {spec['target']} with {spec['expected']}; leave out anything not said.",
+            "ask": f"Ask for the {' and '.join(spec['missing_labels'])} before calling {spec['target']}; don't "
+                   f"fill it in.",
+            "lookup": f"Look the id up with {spec['lookup']}, then call {spec['target']} with {spec['expected']}.",
+            "nearby": f"Say it can't {spec['op_label']}; don't use {', '.join(spec['tempting'])} instead.",
+            "none": f"Say it can't {spec['op_label']}: no tool on offer fits.",
+        }[situation]
+        return dict(category=category, instruction=spec["request"], summary=summary,
+                    expected_status="cannot_do" if situation in ("nearby", "none") else "done",
+                    should_ask=situation == "ask", clarification=spec["answer"],
+                    tools_needed=situation not in ("nearby", "none"), app=spec)
+    make.__name__ = f"{'newapp' if held_out else 'app'}_{situation}"
+    return make
+
+
+APP_SITUATIONS = ("call", "ask", "lookup", "nearby", "none")
+# Procedural tasks in other apps. Training uses APP_TEMPLATES; APP_HELDOUT_TEMPLATES are apps never trained on.
+APP_TEMPLATES = {f"app_{s}": _app_template(s, False) for s in APP_SITUATIONS}
+APP_HELDOUT_TEMPLATES = {f"newapp_{s}": _app_template(s, True) for s in APP_SITUATIONS}
+EVAL_ONLY_TEMPLATES = {**HELDOUT_TEMPLATES, **APP_HELDOUT_TEMPLATES}
+ALL_TEMPLATES = {**TEMPLATES, **HELDOUT_TEMPLATES, **APP_TEMPLATES, **APP_HELDOUT_TEMPLATES}
 # Extra world records each held-out template needs (the template also reports them as world_extras).
 TEMPLATE_EXTRAS = {"ambiguous_event": ("two_meetings",), "third_party_request": ("marketplace",),
                    "injection_event": ("vendor_demo",)}
@@ -694,13 +728,17 @@ TEMPLATE_EXTRAS = {"ambiguous_event": ("two_meetings",), "third_party_request": 
 
 def template_names(spec: str | list[str] | None) -> list[str]:
     """Template names from a list or a comma-separated string. 'heldout' means every held-out template and 'all'
-    means every template; an empty spec means the training templates, which is also what reports compare."""
+    every one of Alfred's own email and calendar templates; 'apps' means the procedural app templates on training
+    apps and 'newapps' the same on held-out apps. An empty spec means Alfred's own training templates, which is also
+    what reports compare."""
     if not spec:
         return list(TEMPLATES)
     items = [x.strip() for x in (spec.split(",") if isinstance(spec, str) else spec) if x.strip()]
     out = []
     for x in items:
-        out += list(HELDOUT_TEMPLATES) if x == "heldout" else list(ALL_TEMPLATES) if x == "all" else [x]
+        groups = {"heldout": HELDOUT_TEMPLATES, "apps": APP_TEMPLATES, "newapps": APP_HELDOUT_TEMPLATES,
+                  "all": {**TEMPLATES, **HELDOUT_TEMPLATES}}
+        out += list(groups[x]) if x in groups else [x]
     return list(dict.fromkeys(out))
 
 

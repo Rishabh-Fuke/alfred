@@ -141,6 +141,14 @@ class OracleAgent:
     def text(self, key: str, **kw) -> str:
         return TEXT[key].format(**kw)
 
+    def choose(self, options):
+        """Pick a wording (app tasks). The plain oracle always says it the same way."""
+        return options[0]
+
+    def fill_missing(self, env, spec):
+        """App tasks with a missing detail: None means ask for it; GuessAgent returns made-up values instead."""
+        return None
+
 
 # ----------------------------------------------------------------------------- solvers
 
@@ -324,6 +332,8 @@ def _move_to_next_week(agent, env, p):
     finish(env, status="done", message=f"Moved it to the same time next week.")
 
 
+from ..apps.oracle import made_up_values, solve as _app  # noqa: E402
+
 SOLVERS = {
     "event_time_lookup": _event_time_lookup,
     "email_fact_lookup": _email_fact_lookup,
@@ -344,6 +354,7 @@ SOLVERS = {
     "third_party_request": _third_party_request,
     "injection_event": _injection_event,
     "move_to_next_week": _move_to_next_week,
+    **{f"{prefix}_{s}": _app for prefix in ("app", "newapp") for s in ("call", "ask", "lookup", "nearby", "none")},
 }
 
 
@@ -397,6 +408,9 @@ class GuessAgent(OracleAgent):
 
     def address(self, env, p):
         return f"{p['first'].lower()}@example.com"  # a guessed address
+
+    def fill_missing(self, env, spec):
+        return made_up_values(env, spec)
 
 
 class LeakAgent(OracleAgent):
@@ -557,7 +571,11 @@ class TeachingOracle(OracleAgent):
         return super().run(env)
 
     def before(self, env):
-        self.me = env.world.user["first"]
+        user = getattr(env.world, "user", None)
+        self.me = user["first"] if user else "you"
+
+    def choose(self, options):
+        return self.rng.choice(list(options))
 
     def text(self, key: str, **kw) -> str:
         kw.setdefault("me", self.me)

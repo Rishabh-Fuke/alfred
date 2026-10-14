@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from ..agents.llm import OpenAICompatAgent
-from ..env import Environment
+from ..env import make_env
 from ..reward import compute_reward
 from ..tasks import Task
 
@@ -44,7 +44,7 @@ def make_client(base_url: str, timeout: float = 300.0):
 
 def play(task: Task, model: str, client, sample: int = 0, temperature: float = 0.9, top_p: float = 1.0,
          max_tokens: int = 2048, max_steps: int = 12, reward_weights: dict | None = None) -> Episode:
-    env = Environment(task, prompt="plain", max_steps=max_steps, tool_mode="native")
+    env = make_env(task, prompt="plain", max_steps=max_steps, tool_mode="native")
     agent = OpenAICompatAgent(model, client=client, temperature=temperature, max_tokens=max_tokens,
                               tool_mode="native",
                               extra_body={"top_p": top_p, "chat_template_kwargs": {"enable_thinking": False}})

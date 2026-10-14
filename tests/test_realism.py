@@ -16,7 +16,7 @@ from alfred.tasks import generate_tasks
 from alfred.world import EXTRAS, World
 
 FIXTURE = Path(__file__).parent / "fixtures" / "base_world_hashes.json"
-NEW_TASK_FIELDS = {"params", "world_style", "pack", "pack_id", "interface", "tools_needed"}
+NEW_TASK_FIELDS = {"params", "world_style", "pack", "pack_id", "interface", "tools_needed", "app"}
 
 
 def _hash(obj) -> str:

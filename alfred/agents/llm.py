@@ -219,7 +219,8 @@ class OpenAICompatAgent:
                 visible = strip_think(content)
                 parsed = parse_json_tool_call(visible)
                 messages.append({"role": "assistant", "content": content})
-                if isinstance(parsed, tuple) and (not native or parsed[0] in TOOL_NAMES):
+                offered = {t["function"]["name"] for t in obs.tools}
+                if isinstance(parsed, tuple) and (not native or parsed[0] in TOOL_NAMES or parsed[0] in offered):
                     # json mode, or a native-mode model that wrote its call as text
                     if native:
                         stats["recovered_calls"] += 1
