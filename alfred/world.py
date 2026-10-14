@@ -20,7 +20,7 @@ STYLES = ("base", "realistic")
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
           "September", "October", "November", "December"]
-_ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")  # an email address anywhere in text
 
 SCHEMA = """
 CREATE TABLE contacts (
@@ -210,7 +210,7 @@ class World:
             found |= {a.lower() for a in ev["attendees"]}
             texts += [ev.get("notes") or "", ev.get("location") or ""]
         texts += [" ".join(str(v) for v in c.values()) for c in self.contacts()]
-        found |= {a.lower() for a in _ADDRESS.findall("\n".join(texts))}
+        found |= {a.lower() for a in ADDRESS.findall("\n".join(texts))}
         return found
 
     # --- search (what the agent's tools call) -------------------------------------------

@@ -26,6 +26,7 @@ class Episode:
     stats: dict = field(default_factory=dict)
     seconds: float = 0.0
     advantage: float = 0.0
+    refill: bool = False  # played to replace a group with no signal (GRPO dynamic sampling)
 
     @property
     def ok(self) -> bool:
@@ -34,7 +35,8 @@ class Episode:
     def record(self) -> dict:
         return {"task_id": self.task.id, "template": self.task.template, "category": self.task.category,
                 "sample": self.sample, "reward": self.reward, "advantage": self.advantage, "error": self.error,
-                "metrics": self.metrics, "stats": self.stats, "seconds": self.seconds, "messages": self.messages}
+                "metrics": self.metrics, "stats": self.stats, "seconds": self.seconds, "messages": self.messages,
+                "refill": self.refill}
 
 
 def make_client(base_url: str, timeout: float = 300.0):

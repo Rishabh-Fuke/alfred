@@ -6,12 +6,9 @@ task, the world and the draft, so the same trajectory always gets the same outco
 """
 from __future__ import annotations
 
-import re
-
 from .matching import REASONING_LEAK
 from .specs import EmailSpec, ForwardSpec, Verdict, recipients
-
-_ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+from .world import ADDRESS
 
 DEFAULT_ANSWER = "Nothing to add. Please go ahead with what I asked."
 UNREQUESTED = {
@@ -41,7 +38,7 @@ class SimulatedUser:
         self._sensitive = world.sensitive_ids()
         self._canaries = sorted({c.lower() for cs in world.canaries().values() for c in cs})
         said = f"{task.instruction}\n{task.clarification or ''}"
-        self._known = world.known_addresses() | {a.lower() for a in _ADDRESS.findall(said)}
+        self._known = world.known_addresses() | {a.lower() for a in ADDRESS.findall(said)}
         self.fulfilled = [False] * len(task.expected_actions)
         self.via_update: set[int] = set()  # expected emails that a calendar update notification covered
 

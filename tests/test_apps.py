@@ -164,3 +164,69 @@ def test_dates_and_grounding():
     assert not grounded("date", "2027-01-08", k)
     assert grounded("string", "Ithaca, NY", k) and grounded("date", "2027-01-09", k)
     assert grounded("date", "2027-01-08", k, default="today")  # unless it's the tool's documented default
+    # Review fixes: a place made only of state or country words, and digits inside dates, times and ids.
+    assert not grounded("string", "New York", k) and not grounded("string", "Washington", k)
+    said = Known(today)
+    said.add_text("Find a pharmacy in New York.")
+    assert grounded("string", "New York", said)
+    assert not grounded("integer", 20, k)  # "Jan 20" isn't a count of anything
+    k.add_text("Record a swim on Nov 14 at 3:30 PM for prescription RX-48213. Which one?")
+    for n in (14, 3, 30, 48213, 1):
+        assert not grounded("integer", n, k), n
+    k.add_text('{"results": [{"id": "W-7587", "minutes": "25"}]}')
+    assert grounded("integer", 25, k)  # a record that says 25 does ground it
+
+
+def _done_read_task(template, interface="text"):
+    for t in generate_tasks(0, 120, [template], interface=interface):
+        if not t.app["tool_ops"][t.app["target"]]["writes"]:
+            return t
+    raise AssertionError("no read-target task")
+
+
+def _call_target(env):
+    sp = env.spec
+    props = next(x["function"] for x in sp["tools"] if x["function"]["name"] == sp["target"])["parameters"]["properties"]
+    args = {k: (float(v) if props[k]["type"] == "number" else int(float(v)) if props[k]["type"] == "integer" else v)
+            for k, v in sp["expected"].items()}
+    return json.loads(env.call_tool(sp["target"], args))
+
+
+@pytest.mark.parametrize("template", ["app_ask", "app_call"])
+def test_a_question_after_the_task_is_done_is_a_closing_offer(template):
+    """Review fix: on a read task nothing is ever submitted, so a closing offer used to count as a new question."""
+    task = _done_read_task(template)
+    env = make_env(task)
+    env.reset()
+    if template == "app_ask":
+        assert env.reply("Which city?") is not None  # the real question still counts
+    assert "results" in _call_target(env)
+    assert env.reply("Here are the options. Which one would you like me to look at?") is None and env.done
+    m = env.metrics()
+    assert m["success"] and m["asked"] == (template == "app_ask")
+    assert compute_reward(m) == 1.0
+
+
+def test_a_none_task_never_names_the_app_it_asks_about():
+    for t in generate_tasks(0, 60, ["app_none"]):
+        offered = {TRAIN[o["domain"]].app for o in t.app["tool_ops"].values()}
+        if "connected to their" in t.app["system"]:
+            named = t.app["system"].split("connected to their ", 1)[1].split(" app")[0]
+            assert named in offered and named != TRAIN[t.app["domain"]].app, t.id
+
+
+def test_enum_values_with_hyphens_or_capitals_are_accepted():
+    for t in generate_tasks(0, 80, ["app_call"]):
+        props = next(x["function"] for x in t.app["tools"]
+                     if x["function"]["name"] == t.app["target"])["parameters"]["properties"]
+        enums = [p for p in t.app["expected"] if "enum" in props[p] and "_" in str(t.app["expected"][p])]
+        if enums:
+            env = make_env(t)
+            env.reset()
+            args = {k: (float(v) if props[k]["type"] == "number" else int(float(v)) if props[k]["type"] == "integer"
+                        else v) for k, v in t.app["expected"].items()}
+            args[enums[0]] = args[enums[0]].replace("_", "-").title()  # "Oil-Change"
+            res = json.loads(env.call_tool(t.app["target"], args))
+            assert "error" not in res and env.log[-1]["checks"][enums[0]] == "right", (t.id, res)
+            return
+    raise AssertionError("no task with a multi-word enum")

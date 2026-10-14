@@ -12,7 +12,7 @@ import random
 import re
 from datetime import timedelta
 
-from ..world import WEEKDAYS, fmt_dt, human_time, parse_dt
+from ..world import ADDRESS, WEEKDAYS, fmt_dt, human_time, parse_dt
 
 # What the oracle writes: drafts, questions and final messages. TeachingOracle varies them.
 TEXT = {
@@ -48,7 +48,6 @@ TEXT = {
     "oos_traffic": "I can't check traffic. I don't have maps or live traffic data.",
     "oos_flight_price": "I can't search for flights or prices. I can only work with your email, calendar and contacts.",
 }
-ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
 def call(env, name: str, **args) -> dict:

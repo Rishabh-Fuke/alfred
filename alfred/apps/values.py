@@ -37,6 +37,8 @@ _DAY_MONTH = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(" + "|".join(
                         r")[a-z]*(?:,?\s+(\d{4}))?\b", re.I)
 _TIME = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?\b", re.I)
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+# Numbers that are part of something else: an id (RX-48213, #A12345), a time (3:30, 3 PM), a date.
+_NOT_A_COUNT = re.compile(r"#?\b[A-Za-z]+-?\d[\w-]*|\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)", re.I)
 
 
 def tokens(text) -> set[str]:
@@ -185,10 +187,15 @@ class Known:
                 t = parse_time(m.group())
                 if t:
                     self.times.add(t)
-        for m in _NUMBER.finditer(text.replace(",", "")):
+        # Counts and amounts: not the digits inside dates, times or ids ("Nov 20" says nothing about 20 minutes),
+        # and not "one", which is mostly a pronoun ("which one").
+        bare = text.replace(",", "")
+        for rx in (_ISO, _MONTH_DAY, _DAY_MONTH, _SLASH, _NOT_A_COUNT):
+            bare = rx.sub(" ", bare)
+        for m in _NUMBER.finditer(bare):
             self.numbers.add(float(m.group()))
         for w, n in NUMBER_WORDS.items():
-            if re.search(rf"\b{w}\b", text.lower()):
+            if w != "one" and re.search(rf"\b{w}\b", text.lower()):
                 self.numbers.add(float(n))
 
     def add_value(self, kind: str, value) -> None:
@@ -239,7 +246,10 @@ def grounded(kind: str, value, known: Known, default=None, options=()) -> bool:
         v = str(value).strip().lower().lstrip("#")
         return bool(v) and re.search(rf"(?<![\w-]){re.escape(v)}(?![\w-])", known.text.replace("#", "")) is not None
     words = tokens(value)
-    return bool(words) and words - PLACE_EXTRAS <= known.words
+    core = words - PLACE_EXTRAS  # "Ithaca, NY": the place is what has to have been said, not the state
+    if not core:  # made only of place words ("New York", "Washington"): all of them have to have been said
+        return bool(words) and words <= known.words
+    return core <= known.words
 
 
 # ----------------------------------------------------------------------------- saying

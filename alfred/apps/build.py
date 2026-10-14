@@ -334,7 +334,9 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
     return {
         "domain": d.key, "app": d.app, "op": op.key, "op_label": op.label, "situation": situation,
         "held_out": held_out, "today": today.isoformat(), "style": style,
-        "request": request, "system": system_prompt(user, today, d.app, rng),
+        # A "none" task offers only other apps' tools, so its prompt names one of those, never the app asked about.
+        "request": request, "system": system_prompt(user, today, picked[0][0].app if situation == "none" else d.app,
+                                                    rng),
         "tools": tools, "tool_ops": tool_ops,
         "target": target, "expected": expected,
         "missing": [k for k in missing], "missing_labels": [d.params[k].label for k in missing],

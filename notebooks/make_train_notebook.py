@@ -213,7 +213,9 @@ ROUND1_TEMPLATES = ','.join(list(TEMPLATES)[:9])  # the nine task types round 1 
 ALFRED_SUITE = [('tools-real', [*REAL], N_TRAIN), ('tools-heldout-real', [*REAL, '--templates', 'heldout'], N_HELD),
                 ('text-real', [*TEXT, *REAL], N_TRAIN),
                 ('text-heldout-real', [*TEXT, *REAL, '--templates', 'heldout'], N_HELD)]
-# The app evals: the training apps on new worlds (plain text), and the four apps never trained on, in each interface.
+# The app evals. apps-text is an in-distribution check: the training apps on new worlds, with the same request
+# templates and values as training, so some requests repeat training ones word for word. Transfer is measured on
+# newapps: the four apps never trained on, in each interface.
 APP_SUITE = [('apps-text', [*TEXT, '--templates', 'apps'], N_APPS),
              ('newapps-text', [*TEXT, '--templates', 'newapps'], N_APPS),
              ('newapps-tools', ['--templates', 'newapps'], N_APPS)]

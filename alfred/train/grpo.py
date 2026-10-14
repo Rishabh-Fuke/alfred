@@ -383,14 +383,18 @@ class Trainer:
             t0 = time.time()
             tasks = self.sampler.sample(a.tasks)
             episodes = self.play_groups(tasks)
-            zero_var = len(without_signal(tasks, episodes))  # before any refill, comparable with earlier rounds
+            drawn = list(episodes)  # the step's rates come from these, so they compare with rounds without refills
+            zero_var = len(without_signal(tasks, episodes))
             refilled = 0
             for _ in range(a.refill_rounds):
                 missing = a.tasks - (len(tasks) - len(without_signal(tasks, episodes)))
                 if missing <= 0:
                     break
                 extra = self.sampler.sample(missing, avoid={(t.world_seed, t.template) for t in tasks})
-                tasks, episodes, refilled = tasks + extra, episodes + self.play_groups(extra), refilled + len(extra)
+                more = self.play_groups(extra)
+                for ep in more:
+                    ep.refill = True
+                tasks, episodes, refilled = tasks + extra, episodes + more, refilled + len(extra)
             t_play = time.time() - t0
             advantages(episodes, a.adv_norm)
             for tpl in {t.template for t in tasks}:
@@ -402,7 +406,7 @@ class Trainer:
             self.step += 1
             save_episodes(self.out / "episodes" / f"step-{self.step:05d}.jsonl.gz", episodes)
             self.publish(self.save_step_adapter())
-            rec = {"step": self.step, **batch_stats(episodes), **train_info, "groups_without_signal": zero_var,
+            rec = {"step": self.step, **batch_stats(drawn), **train_info, "groups_without_signal": zero_var,
                    "groups_refilled": refilled, "groups_with_signal": len(tasks) - len(without_signal(tasks, episodes)),
                    "play_s": round(t_play, 1), "train_s": round(time.time() - t1, 1),
                    "template_weights": {k: round(v, 3) for k, v in self.sampler.weights().items()}}

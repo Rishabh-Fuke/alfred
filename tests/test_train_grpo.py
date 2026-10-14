@@ -184,3 +184,7 @@ def test_grpo_trains_on_app_tasks_and_refills_groups_without_signal(tiny_model_d
         assert all(e["metrics"]["clean_success"] for e in eps)
         assert rec["groups_without_signal"] == 2 and rec["groups_refilled"] == 4 and rec["groups_with_signal"] == 0
         assert len(eps) == (2 + 4) * 4 and rec["trained_episodes"] == 0
+        # The step's rates come from the drawn groups only; refills are marked, and the audit leaves them out.
+        assert rec["episodes"] == 2 * 4 and sum(e["refill"] for e in eps) == 4 * 4
+        from alfred.train.audit import load_episodes
+        assert len(load_episodes(out)[1]) == 2 * 4

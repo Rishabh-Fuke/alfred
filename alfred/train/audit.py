@@ -109,7 +109,8 @@ def load_episodes(run: Path) -> dict[int, list[dict]]:
     for path in sorted((run / "episodes").glob("step-*.jsonl.gz")):
         step = int(path.name.split("-")[1].split(".")[0])
         with gzip.open(path, "rt") as f:
-            steps[step] = [json.loads(line) for line in f if line.strip()]
+            # Refills (GRPO dynamic sampling) are drawn for having no signal, so they'd skew the rates: skip them.
+            steps[step] = [e for e in (json.loads(line) for line in f if line.strip()) if not e.get("refill")]
     return steps
 
 

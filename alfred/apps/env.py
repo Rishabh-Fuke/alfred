@@ -23,7 +23,7 @@ from ..matching import INABILITY, REASONING_LEAK
 from ..user_sim import DEFAULT_ANSWER
 from .build import make_records
 from .catalog import HELDOUT, TRAIN
-from .values import Known, grounded, parse_bool, parse_number, same
+from .values import Known, grounded, norm_enum, parse_bool, parse_number, same
 
 DOMAINS = {**TRAIN, **HELDOUT}
 TALK_SCHEMAS = [t for t in T.TOOL_SCHEMAS if t["function"]["name"] in T.TALK_TOOLS]
@@ -144,7 +144,9 @@ class AppEnvironment:
             self.implicit_finish(text)
             return None
         text = text or ""
-        if not self.actions and len(self.asks) < 3:
+        # Once the target call went through, a question is a closing offer ("Want me to check their hours?"), not
+        # a question the task turns on: it ends the episode, as a reply after a draft does in Alfred's own tasks.
+        if not self.actions and not any(e.get("ok") for e in self.log) and len(self.asks) < 3:
             asking = (("?" in text or bool(ASKS_FOR_INFO.search(text))) if self.task.should_ask
                       else is_question(text))
             if asking:
@@ -234,7 +236,7 @@ class AppEnvironment:
                 if not isinstance(val, str):
                     raise T.InvalidCall(f"'{pname}' must be a string.")
                 if "enum" in props[pname]:
-                    v = val.strip().lower().replace(" ", "_")
+                    v = norm_enum(val)
                     if v not in props[pname]["enum"]:
                         raise T.InvalidCall(f"'{pname}' must be one of: {', '.join(props[pname]['enum'])}.")
                     val = v
