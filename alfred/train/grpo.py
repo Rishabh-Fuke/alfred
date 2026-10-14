@@ -75,16 +75,19 @@ class TaskSampler:
     def weights(self) -> dict[str, float]:
         return {t: self.floor + p * (1 - p) for t, p in self.solve_rate.items()}
 
-    def sample(self, n: int) -> list:
+    def sample(self, n: int, avoid: set | None = None) -> list:
+        """n tasks, none of them a (world, template) pair in avoid."""
         w = self.weights()
         picks = self.rng.choices(self.templates, [w[t] for t in self.templates], k=n)
-        tasks, seen = [], set()
+        tasks, seen = [], set(avoid or ())
         for tpl in picks:
-            while True:
+            for _ in range(1000):
                 seed = self.rng.choice(self.worlds)
                 if (seed, tpl) not in seen:
                     seen.add((seed, tpl))
                     break
+            else:
+                continue  # every world of this template is already in the step
             style = "realistic" if self.rng.random() < self.realistic_share else "base"
             interface = "text" if self.rng.random() < self.text_share else "tools"
             tasks.append(generate_tasks(seed, 1, [tpl], style=style, pack=self.pack, interface=interface)[0])
@@ -100,6 +103,12 @@ class TaskSampler:
         self.solve_rate = d["solve_rate"]
         state = d["rng"]
         self.rng.setstate((state[0], tuple(state[1]), state[2]))
+
+
+def without_signal(tasks: list, episodes: list[Episode]) -> list:
+    """Tasks whose attempts all got the same reward. GRPO learns only from differences within a group, so these
+    teach nothing (round 2: 6.5 of 8 groups per step on average, after SFT had already reached 0.95)."""
+    return [t for t in tasks if len({e.reward for e in episodes if e.ok and e.task.id == t.id}) <= 1]
 
 
 def advantages(episodes: list[Episode], norm: str = "batch") -> list[Episode]:
@@ -199,6 +208,9 @@ def parse_args(argv=None):
     p.add_argument("--steps", type=int, default=100)
     p.add_argument("--tasks", type=int, default=8, help="Tasks per step.")
     p.add_argument("--group", type=int, default=8, help="Episodes per task.")
+    p.add_argument("--refill-rounds", type=int, default=0,
+                   help="Dynamic sampling: up to this many times per step, replace groups whose attempts all got the "
+                        "same reward with fresh tasks, until --tasks groups carry signal (0: off, as in round 2).")
     p.add_argument("--templates", default=",".join(TEMPLATES))
     p.add_argument("--train-worlds", default=f"{TRAIN_WORLDS.start}-{TRAIN_WORLDS.stop - 1}",
                    help="Range of training worlds to sample tasks from (inside 0-949).")
@@ -322,6 +334,12 @@ class Trainer:
         return {"trained_episodes": len(examples), "trained_tokens": n_tokens, "loss": round(pg_sum, 5),
                 "kl": round(kl_sum, 6), "grad_norm": round(grad_norm, 4), "lr": self.opt.param_groups[0]["lr"]}
 
+    def play_groups(self, tasks: list) -> list[Episode]:
+        a = self.a
+        jobs = [(t, s) for t in tasks for s in range(a.group)]
+        return play_many(jobs, self.policy, self.client, a.workers, temperature=a.temperature, top_p=a.top_p,
+                         max_tokens=a.max_tokens, max_steps=a.max_steps)
+
     def validate(self) -> dict:
         eps = play_many([(t, 0) for t in self.val_tasks], self.policy, self.client, self.a.workers,
                         temperature=0.6, top_p=0.95, max_tokens=self.a.max_tokens, max_steps=20)
@@ -364,28 +382,35 @@ class Trainer:
                         (self.out / "best" / "val.json").write_text(json.dumps(v, indent=1))
             t0 = time.time()
             tasks = self.sampler.sample(a.tasks)
-            jobs = [(t, s) for t in tasks for s in range(a.group)]
-            episodes = play_many(jobs, self.policy, self.client, a.workers, temperature=a.temperature,
-                                 top_p=a.top_p, max_tokens=a.max_tokens, max_steps=a.max_steps)
+            episodes = self.play_groups(tasks)
+            zero_var = len(without_signal(tasks, episodes))  # before any refill, comparable with earlier rounds
+            refilled = 0
+            for _ in range(a.refill_rounds):
+                missing = a.tasks - (len(tasks) - len(without_signal(tasks, episodes)))
+                if missing <= 0:
+                    break
+                extra = self.sampler.sample(missing, avoid={(t.world_seed, t.template) for t in tasks})
+                tasks, episodes, refilled = tasks + extra, episodes + self.play_groups(extra), refilled + len(extra)
             t_play = time.time() - t0
             advantages(episodes, a.adv_norm)
             for tpl in {t.template for t in tasks}:
                 solved = [e.metrics["clean_success"] for e in episodes if e.ok and e.task.template == tpl]
                 if solved:
                     self.sampler.update(tpl, sum(solved) / len(solved))
-            zero_var = sum(1 for t in tasks if len({e.reward for e in episodes if e.ok and e.task.id == t.id}) <= 1)
             t1 = time.time()
             train_info = self.train_on(episodes)
             self.step += 1
             save_episodes(self.out / "episodes" / f"step-{self.step:05d}.jsonl.gz", episodes)
             self.publish(self.save_step_adapter())
             rec = {"step": self.step, **batch_stats(episodes), **train_info, "groups_without_signal": zero_var,
+                   "groups_refilled": refilled, "groups_with_signal": len(tasks) - len(without_signal(tasks, episodes)),
                    "play_s": round(t_play, 1), "train_s": round(time.time() - t1, 1),
                    "template_weights": {k: round(v, 3) for k, v in self.sampler.weights().items()}}
             log.write(json.dumps(rec) + "\n")
             log.flush()
             print(f"step {self.step}/{a.steps}  reward {rec.get('reward')}  clean {rec.get('clean_success')}  "
                   f"over-ask {rec.get('over_ask')}  false-decline {rec.get('false_decline')}  "
+                  f"signal {rec['groups_with_signal']}/{len(tasks)} (refilled {refilled})  "
                   f"trained {train_info.get('trained_episodes')} eps  play {t_play:.0f}s  "
                   f"train {rec['train_s']:.0f}s", flush=True)
             if self.step % a.save_every == 0 or self.step == a.steps:

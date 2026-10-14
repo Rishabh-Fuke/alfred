@@ -15,7 +15,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ..agents.scripted import OracleAgent
-from ..env import Environment
+from ..env import make_env
 from ..tasks import generate_tasks
 
 
@@ -23,10 +23,10 @@ def _key(system: str, instruction: str) -> str:
     return (system.splitlines()[0] if system else "") + "\n" + instruction
 
 
-def build_scripts(world_start: int, worlds: int) -> dict:
+def build_scripts(world_start: int, worlds: int, templates=None) -> dict:
     scripts = {}
-    for task in generate_tasks(world_start, worlds):
-        env = Environment(task)
+    for task in generate_tasks(world_start, worlds, templates):
+        env = make_env(task)
         OracleAgent().run(env)
         scripts[_key(env.system_prompt, task.instruction)] = [(e["tool"], e["args"]) for e in env.log if e.get("tool")]
     return scripts

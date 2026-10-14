@@ -21,9 +21,9 @@ class FakeVLLM(ThreadingHTTPServer):
     gives up with an unhelpful finish on its first turn, so groups have rewards to compare."""
     daemon_threads = True
 
-    def __init__(self, scripts):
+    def __init__(self, scripts, lazy: float = 0.5):
         super().__init__(("127.0.0.1", 0), _Handler)
-        self.scripts, self.loaded, self.events, self.problems = scripts, {}, [], []
+        self.scripts, self.loaded, self.events, self.problems, self.lazy = scripts, {}, [], [], lazy
         self.rng, self.lock = random.Random(0), threading.Lock()
 
 
@@ -68,7 +68,7 @@ class _Handler(BaseHTTPRequestHandler):
         script = srv.scripts.get(_key(system, instruction), [])
         turn = sum(m["role"] == "assistant" for m in msgs)
         with srv.lock:
-            lazy = turn == 0 and srv.rng.random() < 0.5
+            lazy = turn == 0 and srv.rng.random() < srv.lazy
         if lazy or turn >= len(script):
             name, args = "finish", {"status": "done", "message": "Done."}
         else:
@@ -133,3 +133,54 @@ def test_grpo_runs_publishes_and_resumes(tiny_model_dir, init_adapter, fake_vllm
     log = [json.loads(x) for x in (out / "log.jsonl").read_text().splitlines()]
     assert [r["step"] for r in log] == [1, 2, 3]
     assert (out / "final" / "adapter_model.safetensors").exists()
+
+
+def test_without_signal_finds_groups_whose_rewards_all_match():
+    t1, t2 = generate_tasks(0, 1)[:2]
+    eps = [Episode(t1, 0, metrics={}, reward=1.0), Episode(t1, 1, metrics={}, reward=1.0),
+           Episode(t2, 0, metrics={}, reward=0.5), Episode(t2, 1, metrics={}, reward=-0.25)]
+    assert grpo.without_signal([t1, t2], eps) == [t1]
+
+
+def test_sampler_never_repeats_a_task_within_a_step():
+    s = grpo.TaskSampler(["app_ask", "event_time_lookup"], range(10))
+    first = s.sample(4)
+    more = s.sample(4, avoid={(t.world_seed, t.template) for t in first})
+    assert not {(t.world_seed, t.template) for t in first} & {(t.world_seed, t.template) for t in more}
+    s = grpo.TaskSampler(["app_ask"], range(2))
+    assert len(s.sample(5)) == 2  # only two distinct tasks exist; it doesn't spin looking for more
+
+
+def _serve(scripts, lazy):
+    srv = FakeVLLM(scripts, lazy)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}/v1"
+
+
+APPS = "app_call,app_nearby,app_lookup"
+
+
+@pytest.mark.parametrize("lazy", [0.5, 0.0])
+def test_grpo_trains_on_app_tasks_and_refills_groups_without_signal(tiny_model_dir, init_adapter, tmp_path, lazy):
+    """lazy 0.5: groups differ, so it trains on app tasks (their tools rendered into the prompt). lazy 0: every
+    attempt replays the oracle, every group gets the same reward, and each step refills them all."""
+    srv, url = _serve({**build_scripts(0, 6, APPS), **build_scripts(950, 1, APPS)}, lazy)
+    out = tmp_path / "grpo"
+    try:
+        grpo.main(["--model", str(tiny_model_dir), "--init-adapter", str(init_adapter), "--out", str(out), "--vllm",
+                   url, "--tasks", "2", "--group", "4", "--train-worlds", "0-5", "--templates", APPS,
+                   "--text-share", "0", "--realistic-share", "0", "--refill-rounds", "2", "--val-every", "5",
+                   "--val-worlds", "1", "--workers", "6", "--lr", "1e-3", "--max-len", "8192", "--steps", "1"])
+    finally:
+        srv.shutdown()
+    assert not srv.problems, srv.problems[:3]
+    rec = json.loads((out / "log.jsonl").read_text().splitlines()[0])
+    with gzip.open(out / "episodes" / "step-00001.jsonl.gz", "rt") as f:
+        eps = [json.loads(x) for x in f]
+    assert {e["template"] for e in eps} <= set(APPS.split(","))
+    if lazy:
+        assert rec["trained_episodes"] > 0 and rec["groups_with_signal"] >= 1
+    else:
+        assert all(e["metrics"]["clean_success"] for e in eps)
+        assert rec["groups_without_signal"] == 2 and rec["groups_refilled"] == 4 and rec["groups_with_signal"] == 0
+        assert len(eps) == (2 + 4) * 4 and rec["trained_episodes"] == 0
