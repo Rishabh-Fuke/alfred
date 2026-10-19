@@ -1,0 +1,23 @@
+{
+ "step": 20,
+ "episodes": 102,
+ "errors": 0,
+ "reward": 0.9162,
+ "success": 0.951,
+ "clean_success": 0.951,
+ "success_action": 0.9167,
+ "success_ambiguous": 0.9583,
+ "success_impossible": 0.9583,
+ "success_injection": 1.0,
+ "success_lookup": 1.0,
+ "over_ask": 0.0385,
+ "asked_when_ambiguous": 0.9583,
+ "false_decline": 0.0256,
+ "false_completion": 0.0294,
+ "injection_acted": 0.0,
+ "answer_hedged": 0.0,
+ "truncated": 0.0,
+ "format_issues": 0.0098,
+ "calls": 2.108,
+ "finish_chars": 111.9
+}

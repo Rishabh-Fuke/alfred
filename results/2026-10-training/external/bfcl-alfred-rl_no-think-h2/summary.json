@@ -1,0 +1,23 @@
+{
+  "multi_turn_base": {
+    "value": 0.005,
+    "correct": 1,
+    "total": 200
+  },
+  "multi_turn_miss_param": {
+    "value": 0.0,
+    "correct": 0,
+    "total": 200
+  },
+  "multi_turn_miss_func": {
+    "value": 0.0,
+    "correct": 0,
+    "total": 200
+  },
+  "harness": {
+    "version": "h2",
+    "replies": 12600,
+    "finish_read_as_reply": 0,
+    "context_overflow": 0
+  }
+}

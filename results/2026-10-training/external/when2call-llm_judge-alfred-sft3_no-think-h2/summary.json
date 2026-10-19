@@ -1,0 +1,59 @@
+{
+  "items": 300,
+  "by_label": {
+    "tool_call": {
+      "value": 0.97,
+      "lo": 0.93,
+      "hi": 1.0,
+      "n": 100
+    },
+    "request_for_info": {
+      "value": 0.58,
+      "lo": 0.48,
+      "hi": 0.68,
+      "n": 100
+    },
+    "cannot_answer": {
+      "value": 0.54,
+      "lo": 0.45,
+      "hi": 0.64,
+      "n": 100
+    }
+  },
+  "confusion": {
+    "tool_call": {
+      "tool_call": 97,
+      "request_for_info": 2,
+      "direct_answer": 1
+    },
+    "request_for_info": {
+      "tool_call": 42,
+      "request_for_info": 58
+    },
+    "cannot_answer": {
+      "tool_call": 22,
+      "cannot_answer": 54,
+      "direct_answer": 4,
+      "request_for_info": 20
+    }
+  },
+  "macro_f1": 0.6963460549667446,
+  "accuracy": {
+    "value": 0.6966666666666667,
+    "lo": 0.6466666666666666,
+    "hi": 0.7533333333333333,
+    "n": 300
+  },
+  "tool_hallucination": {
+    "value": 0.0,
+    "lo": 0.0,
+    "hi": 0.0,
+    "n": 17
+  },
+  "harness": {
+    "version": "h2",
+    "replies": 299,
+    "finish_read_as_reply": 0,
+    "context_overflow": 0
+  }
+}

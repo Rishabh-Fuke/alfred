@@ -1,0 +1,57 @@
+{
+  "items": 300,
+  "by_label": {
+    "tool_call": {
+      "value": 1.0,
+      "lo": 1.0,
+      "hi": 1.0,
+      "n": 100
+    },
+    "request_for_info": {
+      "value": 0.03,
+      "lo": 0.0,
+      "hi": 0.07,
+      "n": 100
+    },
+    "cannot_answer": {
+      "value": 0.1,
+      "lo": 0.04,
+      "hi": 0.16,
+      "n": 100
+    }
+  },
+  "confusion": {
+    "tool_call": {
+      "tool_call": 100
+    },
+    "request_for_info": {
+      "tool_call": 97,
+      "request_for_info": 3
+    },
+    "cannot_answer": {
+      "tool_call": 80,
+      "cannot_answer": 10,
+      "direct_answer": 6,
+      "request_for_info": 4
+    }
+  },
+  "macro_f1": 0.2561323089843876,
+  "accuracy": {
+    "value": 0.37666666666666665,
+    "lo": 0.32,
+    "hi": 0.43,
+    "n": 300
+  },
+  "tool_hallucination": {
+    "value": 0.0,
+    "lo": 0.0,
+    "hi": 0.0,
+    "n": 17
+  },
+  "harness": {
+    "version": "h2",
+    "replies": 299,
+    "finish_read_as_reply": 0,
+    "context_overflow": 0
+  }
+}
