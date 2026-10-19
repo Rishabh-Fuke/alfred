@@ -236,6 +236,12 @@ Fine-tuning did most of the work again. When2Call macro F1 was 0.70 after fine-t
   rare in training (3% of drafts by the end of RL), so recovering was barely practiced.
 - **Weekday-to-date arithmetic is unreliable.** Told "Friday at 11:30", it drafted the wrong date twice, and once
   wrote 2027-03-34.
+- **About 13% of round 3's app eval tasks varied between eval runs.** The generator picked values in set order,
+  which Python randomizes per process, so 10 of the 75 app eval tasks (all date-and-time bookings) were worded and
+  tooled differently in each model's run. The same situations and difficulty, but not identical tasks. On the 63
+  tasks that were identical for every model, the result holds: on apps never trained on, clean success went from 75%
+  to 100% (plain replies) and from 68% to 92% (tools). Fixed after round 3; a test now generates every task under
+  three hash seeds and requires identical output.
 - **Small samples.** Each Alfred suite is 25 to 60 tasks with 3 tries each. Read the intervals, not the point
   estimates, when the gap is under about 15 points.
 - **The When2Call judge is an LLM** (Nemotron 3 Super), and in 8 of 12 round-2 misses on "can't" items the reply

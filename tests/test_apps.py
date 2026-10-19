@@ -230,3 +230,95 @@ def test_enum_values_with_hyphens_or_capitals_are_accepted():
             assert "error" not in res and env.log[-1]["checks"][enums[0]] == "right", (t.id, res)
             return
     raise AssertionError("no task with a multi-word enum")
+
+
+# ----------------------------------------------------------------------------- round 4: pick, multi-turn, determinism
+
+def test_tasks_are_the_same_in_every_python_process():
+    """Sets iterate in a different order in each process (string hashing is randomized), so anything that draws a
+    random number per item of a set makes a different task in each run. Round 3's app tasks had this bug: 10 of 75
+    eval tasks differed between eval runs."""
+    import subprocess
+    import sys
+    code = ("import hashlib, json; from alfred.tasks import generate_tasks; "
+            "rows = [t.to_json() for g in ('apps', 'newapps', 'apps4', 'newapps4') for i in ('tools', 'text') "
+            "for t in generate_tasks(1000, 4, g, interface=i)]; "
+            "print(hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest())")
+    root = __file__.rsplit("/tests/", 1)[0]
+    outs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=root, check=True,
+                           env={"PYTHONHASHSEED": str(h), "PYTHONPATH": root, "PATH": "/usr/bin:/bin"}).stdout
+            for h in (1, 2, 3)}
+    assert len(outs) == 1, outs
+
+
+@pytest.mark.parametrize("template", ["app_pick", "newapp_pick"])
+def test_pick_shows_two_matches_and_guessing_fails(template):
+    seed = 0 if template == "app_pick" else 1000
+    for task in generate_tasks(seed, 20, [template], interface="text"):
+        sp = task.app
+        ent = next(e for e in sp["records"].values() if any(r["id"] == sp["pick"]["target_id"] for r in e))
+        target = next(r for r in ent if r["id"] == sp["pick"]["target_id"])
+        twin = next(r for r in ent if r["id"] == sp["pick"]["twin_id"])
+        ref = next(k for k in target if k != "id" and target[k] == twin[k] and sum(r.get(k) == target[k] for r in ent) == 2)
+        assert ref and target[sp["pick"]["field"]] != twin[sp["pick"]["field"]]
+        _, good = _run(task, OracleAgent())
+        env, bad = _run(task, GuessAgent())
+        assert good["clean_success"] and compute_reward(good) == 1.0, task.id
+        assert not bad["success"] and bad["guessed"], task.id
+        if bad["rejected"]:  # it picked the twin: the rejection doesn't say which one was meant
+            fb = next(a["feedback"] for a in env.actions if a["classification"] != "approved")
+            assert sp["pick"]["target_id"] not in (fb or "")
+
+
+def test_conversations_are_text_only_and_use_one_tool_set():
+    for task in generate_tasks(0, 30, ["app_multi"], interface="tools"):
+        sp = task.app
+        assert task.interface == "text" and task.id.endswith("-t") and task.as_interface("tools") is task
+        assert 2 <= len(sp["turns"]) <= 3 and sp["turns"][0]["situation"] in ("call", "lookup")
+        assert len({t["op"] for t in sp["turns"]}) == len(sp["turns"])
+        names = [x["function"]["name"] for x in sp["tools"]]
+        assert len(names) == len(set(names))
+        offered = {(o["domain"], o["op"]) for o in sp["tool_ops"].values()}
+        assert len(offered) == len(names)  # each op once
+        for t in sp["turns"]:
+            if t["situation"] == "nearby":
+                assert (t["domain"], t["op"]) not in offered and t["tempting"]
+            if t["target"]:
+                assert t["target"] in names and set(t["expected"]) <= set(
+                    next(x for x in sp["tools"] if x["function"]["name"] == t["target"])["function"]["parameters"]["properties"])
+        assert not _DANGLING.search(re.sub(r"\b(am I in|could go to|autopay (on|off))\b", "x",
+                                           " ".join(t["request"] for t in sp["turns"])))
+
+
+def test_a_conversation_hands_over_the_next_request_and_grades_every_turn():
+    for task in generate_tasks(0, 20, ["app_multi"]):
+        env, m = _run(task, OracleAgent())
+        assert m["clean_success"] and compute_reward(m) == 1.0 and m["turns_finished"] == m["turns"], task.id
+        nexts = [e for e in env.log if e.get("next_turn")]
+        assert len(nexts) == m["turns"] - 1
+        assert [e["answer"] for e in nexts] == [t["request"] for t in task.app["turns"][1:]]
+
+
+def test_guessing_in_any_turn_fails_the_conversation_and_costs_once():
+    hit = 0
+    for task in generate_tasks(0, 60, ["app_multi"]):
+        if not any(t["situation"] == "ask" for t in task.app["turns"]):
+            continue
+        hit += 1
+        _, good = _run(task, OracleAgent())
+        _, bad = _run(task, GuessAgent())
+        assert good["clean_success"] and not bad["success"] and bad["made_up_calls"] >= 1, task.id
+        assert compute_reward(good) - compute_reward(bad) >= 1.5
+    assert hit >= 10
+
+
+def test_round_four_templates_stay_out_of_round_three_suites():
+    from alfred.tasks import APP4_HELDOUT_TEMPLATES, APP4_TEMPLATES, template_names
+    from alfred.train.data import TRAINING_TEMPLATES
+    assert not set(APP4_TEMPLATES) & set(template_names("apps"))
+    assert not set(APP4_HELDOUT_TEMPLATES) & set(template_names("newapps"))
+    assert set(APP4_TEMPLATES) <= set(TRAINING_TEMPLATES)
+    with pytest.raises(ValueError):
+        _check_templates(list(APP4_HELDOUT_TEMPLATES))
+    for t in generate_tasks(0, 40, ["app_multi", "app_pick"]):
+        assert {o["domain"] for o in t.app["tool_ops"].values()} <= set(TRAIN)

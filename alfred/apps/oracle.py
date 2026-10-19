@@ -52,8 +52,31 @@ def _call(env, tool: str, args: dict) -> dict:
     return json.loads(env.call_tool(tool, args))  # not scripted.call: a tool may have a parameter called "name"
 
 
+ASK_WHICH = ("There are two of those: {a} and {b}. Which one do you mean?",
+             "I found two that match, {a} and {b}. Which one?",
+             "Which one do you mean: {a}, or {b}?")
+
+
 def solve(agent, env, _params=None) -> None:
-    from ..agents.scripted import ask, finish
+    """Every turn of the task (one, or several in a conversation); between turns, the final reply to one request
+    brings back the next."""
+    from ..agents.scripted import finish
+
+    turns = len(getattr(env, "turns", None) or []) or 1
+    for i in range(turns):
+        status, msg = _turn(agent, env)
+        if env.done:
+            return
+        if i < turns - 1:
+            nxt = env.reply(msg)
+            assert nxt is not None and not env.done, "the user's next request should come back"
+        else:
+            finish(env, status, msg)
+
+
+def _turn(agent, env) -> tuple[str, str]:
+    """Handle the request in front of the agent; return the final reply's status and message."""
+    from ..agents.scripted import ask
 
     sp = env.spec
     d = DOMAINS[sp["domain"]]
@@ -62,11 +85,8 @@ def solve(agent, env, _params=None) -> None:
     if situation in ("nearby", "none"):
         if situation == "nearby":
             labels = [d.ops[sp["tool_ops"][t]["op"]].label for t in sp["tempting"]]
-            msg = agent.choose(DECLINE_NEARBY).format(label=op.label, siblings=_join(labels))
-        else:
-            msg = agent.choose(DECLINE_NONE).format(label=op.label)
-        finish(env, "cannot_do", msg)
-        return
+            return "cannot_do", agent.choose(DECLINE_NEARBY).format(label=op.label, siblings=_join(labels))
+        return "cannot_do", agent.choose(DECLINE_NONE).format(label=op.label)
 
     target = sp["target"]
     props = _props(env, target)
@@ -83,26 +103,33 @@ def solve(agent, env, _params=None) -> None:
             ask(env, question)
         else:
             args.update(made_up)
-    if situation == "lookup":
+    if situation in ("lookup", "pick"):
         lister = sp["lookup"]
         key = sp["lookup_param"]
         entity = d.entities[d.params[key].entity]
         pname = next(p for p, k in sp["tool_ops"][target]["params"].items() if k == key)
         record = next(r for r in sp["records"][entity.key] if r["id"] == sp["expected"][pname])
-        largs = {pname: record[entity.ref_field] for pname, k in sp["tool_ops"][lister]["params"].items()
-                 if k == "query" and pname in _props(env, lister)}
+        largs = {lp: record[entity.ref_field] for lp, k in sp["tool_ops"][lister]["params"].items()
+                 if k == "query" and lp in _props(env, lister)}
         found = _call(env, lister, largs)
         assert any(r["id"] == record["id"] for r in found.get("results", [])), \
             f"{record['id']} isn't in what {lister} returns, so the task isn't solvable as written"
+        if situation == "pick":
+            pk = sp["pick"]
+            matches = [r for r in found["results"] if r[entity.ref_field] == record[entity.ref_field]]
+            assert len(matches) == 2, f"a pick task should show exactly two matches, not {len(matches)}"
+            if agent.fill_missing(env, sp) is None:
+                field_ = pk["field"].replace("_", " ")
+                a, b = (f"one with {field_} {v}" for v in pk["values"])
+                ask(env, agent.choose(ASK_WHICH).format(a=a, b=b))
+            else:  # a guesser takes the first match it sees
+                args[pname] = matches[0]["id"]
     res = _call(env, target, {k: _typed(props[k]["type"], v) for k, v in args.items()})
     if "results" in res:
         found = [_summary(r) for r in res["results"]]
         listed = found[0] if len(found) == 1 else ", ".join(found[:-1]) + " and " + found[-1]
-        msg = agent.choose(DONE_READ).format(found=listed, Found=listed[0].upper() + listed[1:], n=len(found))
-    else:
-        msg = agent.choose(DONE_WRITE)
-    if not env.done:
-        finish(env, "done", msg)
+        return "done", agent.choose(DONE_READ).format(found=listed, Found=listed[0].upper() + listed[1:], n=len(found))
+    return "done", agent.choose(DONE_WRITE)
 
 
 def made_up_values(env, sp) -> dict:

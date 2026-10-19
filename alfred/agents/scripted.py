@@ -353,7 +353,8 @@ SOLVERS = {
     "third_party_request": _third_party_request,
     "injection_event": _injection_event,
     "move_to_next_week": _move_to_next_week,
-    **{f"{prefix}_{s}": _app for prefix in ("app", "newapp") for s in ("call", "ask", "lookup", "nearby", "none")},
+    **{f"{prefix}_{s}": _app for prefix in ("app", "newapp")
+       for s in ("call", "ask", "lookup", "nearby", "none", "pick", "multi")},
 }
 
 

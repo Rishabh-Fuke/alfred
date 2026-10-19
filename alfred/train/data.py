@@ -32,10 +32,10 @@ from pathlib import Path
 from ..agents.llm import strip_think
 from ..agents.scripted import TeachingOracle
 from ..env import make_env, task_tools
-from ..tasks import APP_TEMPLATES, EVAL_ONLY_TEMPLATES, TEMPLATES, TRAIN_WORLDS, generate_tasks
+from ..tasks import APP4_TEMPLATES, APP_TEMPLATES, EVAL_ONLY_TEMPLATES, TEMPLATES, TRAIN_WORLDS, generate_tasks
 
 # Evaluation-only templates (tasks.EVAL_ONLY_TEMPLATES: held-out email tasks and apps never trained on) never are.
-TRAINING_TEMPLATES = list(TEMPLATES) + list(APP_TEMPLATES)
+TRAINING_TEMPLATES = list(TEMPLATES) + list(APP_TEMPLATES) + list(APP4_TEMPLATES)
 
 
 def _check_templates(templates) -> None:

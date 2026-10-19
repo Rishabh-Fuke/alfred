@@ -9,6 +9,11 @@ Five situations, each a habit that should carry over to any app:
 - nearby:  the request needs a tool that isn't offered, and a related one is ("pay the bill" with only
            get_bill and set_autopay). Say it can't be done; don't use the related tool instead.
 - none:    nothing on offer fits at all (the tools are another app's). Say it can't be done.
+- pick:    the record the user names matches two that a list tool shows ("the running shoes order", and there are
+           two). Ask which one; a guess is rejected without being told the right one.
+
+make_multi_spec chains two or three of these in one conversation over the same tools, the way BFCL's multi-turn
+tasks work: a later request can be missing a detail, or need a tool that isn't offered.
 
 Tool names, parameter names and descriptions are drawn per task in one of several naming styles, so nothing about
 a particular schema can be memorized.
@@ -22,7 +27,7 @@ from datetime import date, timedelta
 from .catalog import HELDOUT, TRAIN, Domain, Entity, Op, Param
 from .values import say_date, say_number, say_time
 
-SITUATIONS = ("call", "ask", "lookup", "nearby", "none")
+SITUATIONS = ("call", "ask", "lookup", "nearby", "none", "pick")
 NAME_STYLES = ("snake", "camel", "prefixed", "pascal", "double")
 _SLOT = re.compile(r"\{(\w+)\}")
 
@@ -204,7 +209,27 @@ def eligible(d: Domain, op: Op, situation: str) -> bool:
         return any(_can_drop(op, k) for k in op.req if d.params[k].kind != "id")
     if situation == "lookup":
         return any(d.params[k].kind == "id" and _lister(d, d.params[k].entity, op) for k in op.req)
+    if situation == "pick":
+        return any(d.params[k].kind == "id" and _lister(d, d.params[k].entity, op) and _pickable(d.entities[
+            d.params[k].entity]) for k in op.req)
     raise ValueError(situation)
+
+
+def _pickable(e: Entity) -> bool:
+    """Two records can share the name a person uses and still differ in something they can tell apart."""
+    return bool(e.ref_field and _plain_refs(e) and [f for f in e.fields if f != e.ref_field])
+
+
+def _plain_refs(e: Entity) -> list[str]:
+    """Ways to refer to a record that use only its ref_field, so they can't tell two same-named records apart."""
+    return [r for r in e.refs if set(_SLOT.findall(r)) == {e.ref_field}]
+
+
+# How the user says which of two records they meant, by the field that differs.
+_WHICH = {"status": "The one that's {v}.", "species": "The {v}.", "due": "The one due {v}.",
+          "refills_left": "The one with {v} refills left.", "minutes": "The {v}-minute one.",
+          "rate": "The one at {v}.", "rating": "The one rated {v}.", "bikes": "The one with {v} bikes.",
+          "address": "The one on {v}.", "format": "The {v} one."}
 
 
 def _can_drop(op: Op, key: str) -> bool:
@@ -223,13 +248,17 @@ def _lister(d: Domain, entity: str, besides: Op) -> Op | None:
     return None
 
 
-def make_spec(key: str, situation: str, held_out: bool, today: date, user: dict) -> dict:
-    """Everything about one task, as plain JSON-able data. key seeds every random choice."""
+def make_spec(key: str, situation: str, held_out: bool, today: date, user: dict, domain: str = "") -> dict:
+    """Everything about one task, as plain JSON-able data. key seeds every random choice. domain, if given, keeps
+    the task in that app (multi-turn conversations)."""
     if situation not in SITUATIONS:
         raise ValueError(f"unknown situation {situation!r}")
     rng = random.Random(key)
     pool = HELDOUT if held_out else TRAIN
-    choices = [(d, op) for d in pool.values() for op in d.ops.values() if eligible(d, op, situation)]
+    choices = [(d, op) for d in pool.values() for op in d.ops.values() if eligible(d, op, situation)
+               and (not domain or d.key == domain)]
+    if not choices:
+        raise RuntimeError(f"no {situation} task in {domain}")
     for _ in range(100):
         d, op = rng.choice(choices)
         spec = _try(d, op, situation, held_out, today, user, pool, rng)
@@ -271,6 +300,18 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         if not e.refs:
             return None
         refs[lookup_key] = rng.choice(e.refs).format(**target_records[lookup_key])
+    twin = None
+    if situation == "pick":
+        lookup_key = rng.choice([k for k in op.req if d.params[k].kind == "id" and _lister(d, d.params[k].entity, op)
+                                 and _pickable(d.entities[d.params[k].entity])])
+        e = d.entities[d.params[lookup_key].entity]
+        rec = target_records[lookup_key]
+        refs[lookup_key] = rng.choice(_plain_refs(e)).format(**rec)
+        field_ = rng.choice([f for f in e.fields if f != e.ref_field])
+        other = [v for v in e.fields[field_] if v != rec[field_]]
+        twin = {**rec, "id": make_records(e, rng, 1)[0]["id"], field_: rng.choice(other)}
+        if twin["id"] == rec["id"]:
+            return None
 
     optional_wanted = {k for k in op.opt if rng.random() < 0.5}
     want = (set(op.req) - set(missing)) | optional_wanted
@@ -280,7 +321,11 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         return None
     if situation == "ask" and not missing:
         return None
-    phrases = {k: say(d.params[k], values[k], today, rng, refs.get(k, "")) for k in said}
+    # In the order they're said: `said` is a set, and its order changes from one Python process to the next.
+    phrases = {}
+    for k in _SLOT.findall(text):
+        if k not in phrases:
+            phrases[k] = say(d.params[k], values[k], today, rng, refs.get(k, ""))
     request = _tidy(_SLOT.sub(lambda m: phrases[m.group(1)], text))
 
     # what's on offer
@@ -294,7 +339,7 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         offered = []
     else:
         offered = [op]
-        if situation == "lookup":
+        if situation in ("lookup", "pick"):
             offered.append(_lister(d, d.params[lookup_key].entity, op))
         rest = [o for o in others if o not in offered]
         offered += rng.sample(rest, min(len(rest), rng.randint(0, 2)))
@@ -313,7 +358,7 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         tool_ops[name] = {"domain": dd.key, "op": oo.key, "params": pnames, "writes": oo.writes}
         by_op[(dd.key, oo.key)] = name
 
-    target = by_op.get((d.key, op.key)) if situation in ("call", "ask", "lookup") else None
+    target = by_op.get((d.key, op.key)) if situation in ("call", "ask", "lookup", "pick") else None
     expected = {}
     if target:
         inverse = {v: k for k, v in tool_ops[target]["params"].items()}
@@ -330,6 +375,16 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         e = d.entities[d.params[k].entity]
         records[e.key] = make_records(e, rng, rng.randint(3, 4), keep=rec)
     tempting = [by_op[(d.key, s)] for s in op.siblings if (d.key, s) in by_op] if situation == "nearby" else []
+    pick = None
+    if twin:  # the second record with the same name, and how the user says which one they meant
+        e = d.entities[d.params[lookup_key].entity]
+        field_ = next(f for f in e.fields if twin[f] != target_records[lookup_key][f])
+        records[e.key].insert(rng.randrange(len(records[e.key]) + 1), twin)
+        value = target_records[lookup_key][field_]
+        answer = _WHICH.get(field_, "The one where " + field_.replace("_", " ") + " is {v}.").format(v=value)
+        answer = answer.replace("with 1 refills", "with 1 refill")
+        pick = {"field": field_, "target_id": target_records[lookup_key]["id"], "twin_id": twin["id"],
+                "values": [value, twin[field_]]}
 
     return {
         "domain": d.key, "app": d.app, "op": op.key, "op_label": op.label, "situation": situation,
@@ -343,7 +398,7 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         "answer": answer, "revealed": revealed,
         "lookup": by_op[(d.key, _lister(d, d.params[lookup_key].entity, op).key)] if lookup_key else None,
         "lookup_param": lookup_key or None,
-        "records": records, "tempting": tempting,
+        "records": records, "tempting": tempting, "pick": pick,
     }
 
 
@@ -358,3 +413,109 @@ def system_prompt(user: dict, today: date, app: str, rng: random.Random) -> str:
         f"tools when they help. If you need something only {first} knows, ask. If the tools can't do what "
         f"{first} wants, say so.",
     ])
+
+
+# ----------------------------------------------------------------------------- multi-turn conversations
+
+TURN_OPENERS = ("Thanks! ", "Great, thanks. ", "One more thing: ", "Also, ", "Next: ", "")
+LATER_SITUATIONS = ("ask", "ask", "nearby", "nearby", "call", "lookup")  # later turns lean toward the hard cases
+
+
+def _continue(opener: str, request: str) -> str:
+    """A later request in a conversation: "Thanks! Stop my order", "Also, share the file"."""
+    if not opener or opener.endswith((". ", "! ")):
+        return (opener + request).strip()
+    return (opener + request[0].lower() + request[1:]).strip()
+
+
+def make_multi_spec(key: str, held_out: bool, today: date, user: dict) -> dict:
+    """Two or three requests in one conversation, in one app, over one set of tools. The first is ordinary (call
+    or lookup); a later one can be missing a detail (ask) or need a tool that isn't offered (nearby)."""
+    rng = random.Random(key)
+    for attempt in range(200):
+        n = 3 if rng.random() < 0.3 else 2
+        plan = [rng.choice(("call", "lookup"))] + [rng.choice(LATER_SITUATIONS) for _ in range(n - 1)]
+        try:
+            first = make_spec(f"{key}:{attempt}:0", plan[0], held_out, today, user)
+            turns = [first]
+            for i, situation in enumerate(plan[1:], 1):
+                turns.append(make_spec(f"{key}:{attempt}:{i}", situation, held_out, today, user,
+                                       domain=first["domain"]))
+        except RuntimeError:
+            continue
+        if len({t["op"] for t in turns}) < len(turns):
+            continue  # each turn asks for something different
+        spec = _merge_turns(turns, rng)
+        if spec:
+            spec["system"] = rng.choice(["", first["system"]])  # BFCL and When2Call send no system prompt at all
+            return spec
+    raise RuntimeError(f"couldn't build a multi-turn task for {key}")
+
+
+def _merge_turns(turns: list[dict], rng: random.Random) -> dict | None:
+    """One tool set for the whole conversation: each op once, under the first name it got. Later turns' targets,
+    expected arguments and lookups are renamed to match. None if a turn's "not offered" op ends up offered."""
+    base = turns[0]
+    tools = list(base["tools"])
+    tool_ops = {k: dict(v) for k, v in base["tool_ops"].items()}
+    by_op = {(v["domain"], v["op"]): k for k, v in tool_ops.items()}
+    records = {k: list(v) for k, v in base["records"].items()}
+    out_turns = []
+    for i, t in enumerate(turns):
+        rename = {}
+        for name, info in t["tool_ops"].items():
+            opkey = (info["domain"], info["op"])
+            if opkey in by_op:
+                rename[name] = by_op[opkey]
+                continue
+            if name in tool_ops:
+                return None  # same name, different op: rare, just build another conversation
+            tools.append(next(x for x in t["tools"] if x["function"]["name"] == name))
+            tool_ops[name] = dict(info)
+            by_op[opkey] = name
+            rename[name] = name
+
+        def params(old_tool, args):  # an expected-arguments dict, renamed onto the kept tool's parameter names
+            new_tool = rename[old_tool]
+            key_of = t["tool_ops"][old_tool]["params"]
+            name_of = {v: k for k, v in tool_ops[new_tool]["params"].items()}
+            return {name_of[key_of[p]]: v for p, v in args.items()}
+
+        target = rename[t["target"]] if t["target"] else None
+        turn = {k: t[k] for k in ("situation", "op", "op_label", "domain", "missing", "missing_labels", "answer",
+                                  "revealed", "lookup_param", "pick")}
+        turn.update(target=target, expected=params(t["target"], t["expected"]) if t["target"] else {},
+                    lookup=rename[t["lookup"]] if t["lookup"] else None,
+                    tempting=[rename[x] for x in t["tempting"]],
+                    request=_continue(rng.choice(TURN_OPENERS), t["request"]) if i else t["request"])
+        turn["request"] = turn["request"][0].upper() + turn["request"][1:]
+        for ent, recs in t["records"].items():
+            have = records.setdefault(ent, [])
+            ids = {r["id"] for r in have}
+            ref = next((e.ref_field for d in (TRAIN, HELDOUT) for dom in d.values() for e in dom.entities.values()
+                        if e.key == ent), "")
+            names = {r.get(ref) for r in have} if ref else set()
+            for r in recs:
+                if r["id"] in ids:
+                    continue
+                if ref and r.get(ref) in names and t["situation"] != "pick":
+                    # Another turn's record already has this name. If this one is a turn's target, the name would
+                    # match two records and a lookup would become a guess: build another conversation.
+                    if any(r["id"] == v for v in t["expected"].values()):
+                        return None
+                    continue
+                have.append(r)
+                ids.add(r["id"])
+                names.add(r.get(ref))
+        out_turns.append(turn)
+    for turn in out_turns:  # a tool a turn says isn't there must not have been offered by another turn
+        if turn["situation"] in ("nearby", "none") and (turn["domain"], turn["op"]) in by_op:
+            return None
+        if turn["situation"] == "nearby" and not turn["tempting"]:
+            return None
+    first = out_turns[0]
+    return {**{k: base[k] for k in ("domain", "app", "held_out", "today", "style")},
+            "situation": "multi", "op": first["op"], "op_label": first["op_label"], "request": first["request"],
+            "system": base["system"], "tools": tools, "tool_ops": tool_ops, "records": records,
+            "turns": out_turns, **{k: first[k] for k in ("target", "expected", "missing", "missing_labels", "answer",
+                                                          "revealed", "lookup", "lookup_param", "tempting", "pick")}}

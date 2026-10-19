@@ -8,6 +8,10 @@ doesn't pay.
 Every argument is checked as it's made (see values.py): right (means the expected value), wrong, or made up (from
 nothing the agent was told). Made-up values are what this family exists to train away, so they're counted
 everywhere, not only on the call that matters.
+
+Multi-turn tasks (spec["turns"]) are a conversation: when the agent gives its final reply to one request, the user's
+next request comes back as the answer, over the same tools, and each turn is graded on its own. They're always in
+the plain-text interface, as BFCL's multi-turn tasks are.
 """
 from __future__ import annotations
 
@@ -36,14 +40,22 @@ class Observation:
     tools: list
 
 
+def is_multi(task) -> bool:
+    return bool(task.app.get("turns"))
+
+
+def app_interface(task) -> str:
+    return "text" if is_multi(task) else getattr(task, "interface", "tools")
+
+
 def app_tools(task) -> list[dict]:
     """The tools a task offers, as the model sees them."""
-    return list(task.app["tools"]) + (TALK_SCHEMAS if task.interface == "tools" else [])
+    return list(task.app["tools"]) + (TALK_SCHEMAS if app_interface(task) == "tools" else [])
 
 
 def app_system_prompt(task) -> str:
     s = task.app["system"]
-    if task.interface == "tools":
+    if app_interface(task) == "tools":
         s += ("\n\nUse ask_user to ask the user something. When you're done, call finish with status \"done\" and a "
               "short message; if the request can't be done with your tools, call finish with status \"cannot_do\" "
               "and say why.")
@@ -69,7 +81,10 @@ class AppEnvironment:
         self.spec = sp
         self.world = sp  # set once the episode exists (the eval harness checks it)
         self.today = date.fromisoformat(sp["today"])
-        self.interface = getattr(t, "interface", "tools")
+        self.interface = app_interface(t)
+        self.turns = sp.get("turns") or []
+        self.turn = 0
+        self.turn_ends: list[dict] = []  # each finished turn's final reply, in order
         self.tools = app_tools(t)
         self.system_prompt = app_system_prompt(t)
         self.log: list[dict] = []
@@ -83,9 +98,20 @@ class AppEnvironment:
         self.calls = self.invalid_calls = self.tool_errors = self.blocked_reads = 0
         self.known = Known(self.today)
         self.known.add_text(t.instruction)
-        for key, value in sp["revealed"].items():
-            self.known.add_value(DOMAINS[sp["domain"]].params[key].kind, value)
+        if self.turns:
+            self.spec = {**sp, **self.turns[0]}
+        self._learn_revealed()
         return Observation(self.system_prompt, t.instruction, self.tools)
+
+    def _learn_revealed(self) -> None:
+        for key, value in self.spec["revealed"].items():
+            self.known.add_value(DOMAINS[self.spec["domain"]].params[key].kind, value)
+
+    def _should_ask(self) -> bool:
+        return self.spec["situation"] in ("ask", "pick")
+
+    def _this_turn(self, items: list[dict]) -> list[dict]:
+        return [x for x in items if x.get("turn", 0) == self.turn]
 
     def call_tool(self, name: str, arguments) -> str:
         if self.world is None:
@@ -93,7 +119,7 @@ class AppEnvironment:
         if self.done:
             return _dump({"error": "The task has already ended."})
         self.calls += 1
-        entry = {"i": self.calls, "tool": name}
+        entry = {"i": self.calls, "tool": name, "turn": self.turn}
         try:
             args = T.parse_arguments(arguments)
             if name in T.TALK_TOOLS and self.interface == "tools":
@@ -129,7 +155,7 @@ class AppEnvironment:
         self.calls += 1
         self.invalid_calls += 1
         self.log.append({"i": self.calls, "tool": None, "raw_arguments": raw, "result": {"error": message},
-                         "invalid": True})
+                         "invalid": True, "turn": self.turn})
         self._check_budget()
 
     def note_format(self, kind: str) -> None:
@@ -146,14 +172,25 @@ class AppEnvironment:
         text = text or ""
         # Once the target call went through, a question is a closing offer ("Want me to check their hours?"), not
         # a question the task turns on: it ends the episode, as a reply after a draft does in Alfred's own tasks.
-        if not self.actions and not any(e.get("ok") for e in self.log) and len(self.asks) < 3:
-            asking = (("?" in text or bool(ASKS_FOR_INFO.search(text))) if self.task.should_ask
+        if (not self._this_turn(self.actions) and not any(e.get("ok") for e in self._this_turn(self.log))
+                and len(self._this_turn(self.asks)) < 3):
+            asking = (("?" in text or bool(ASKS_FOR_INFO.search(text))) if self._should_ask()
                       else is_question(text))
             if asking:
                 answer = self.ask(text.strip())
-                self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": answer})
+                self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": answer, "turn": self.turn})
                 return answer
-        self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": None})
+        if self.turn < len(self.turns) - 1:  # this request is answered; the user's next one comes back
+            self.turn_ends.append({"status": "unspecified", "message": text, "implicit": False, "via": "reply"})
+            self.turn += 1
+            self.spec = {**self.task.app, **self.turns[self.turn]}
+            nxt = self.spec["request"]
+            self.known.add_text(nxt)
+            self._learn_revealed()
+            self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": nxt, "turn": self.turn - 1,
+                             "next_turn": True})
+            return nxt
+        self.log.append({"i": self.calls, "tool": None, "reply": text, "answer": None, "turn": self.turn})
         self.finish_info = {"status": "unspecified", "message": text, "implicit": False, "via": "reply"}
         self.done = True
         return None
@@ -161,7 +198,7 @@ class AppEnvironment:
     def implicit_finish(self, text: str) -> None:
         if self.done:
             return
-        self.log.append({"i": self.calls, "tool": None, "implicit_finish": True, "text": text})
+        self.log.append({"i": self.calls, "tool": None, "implicit_finish": True, "text": text, "turn": self.turn})
         self.finish_info = {"status": "unspecified", "message": text or "", "implicit": True}
         self.done = True
 
@@ -174,8 +211,8 @@ class AppEnvironment:
             self.truncate()
 
     def ask(self, question: str) -> str:
-        answer = self.task.clarification or DEFAULT_ANSWER
-        self.asks.append({"i": self.calls, "question": question, "answer": answer})
+        answer = self.spec.get("answer") or DEFAULT_ANSWER
+        self.asks.append({"i": self.calls, "question": question, "answer": answer, "turn": self.turn})
         self.known.add_text(answer)
         for key in self.spec["missing"]:
             p = DOMAINS[self.spec["domain"]].params[key]
@@ -311,7 +348,7 @@ class AppEnvironment:
         else:
             verdict, feedback = "approved", None
         self.actions.append({"i": self.calls, "tool": name, "args": args, "classification": verdict,
-                             "feedback": feedback})
+                             "feedback": feedback, "turn": self.turn})
         if verdict == "approved":
             what = ", ".join(f"{k}: {v}" for k, v in args.items())
             return {"status": "approved", "result": f"Done. {op.label[0].upper() + op.label[1:]} ({what})."}
@@ -329,82 +366,126 @@ class AppEnvironment:
                "log": getattr(self, "log", []), "actions": getattr(self, "actions", []), "opened": [],
                "listed": getattr(self, "listed", []), "asks": getattr(self, "asks", []),
                "format_notes": getattr(self, "format_notes", []), "finish": getattr(self, "finish_info", None),
-               "metrics": self.metrics() if self.world else None}
+               "turn_ends": getattr(self, "turn_ends", []), "metrics": self.metrics() if self.world else None}
         if extra:
             out.update(extra)
         return out
 
 
-def score_app(env) -> dict:
-    """The same metrics as alfred.checker.score (so reports, rewards and audits read them unchanged), plus
-    made_up_calls, wrong_tool and the situation."""
-    t, sp = env.task, env.spec
+def _score_turn(env, sp: dict, log: list, actions: list, asks: list, fin: dict | None) -> dict:
+    """One request's outcome, from its own log entries, drafts, questions and final reply."""
     situation, target = sp["situation"], sp["target"]
-    fin = env.finish_info
     finished = fin is not None
     implicit = bool(fin and fin.get("implicit"))
     message = (fin or {}).get("message", "") or ""
     status = (fin or {}).get("status")
-    calls = [e for e in env.log if e.get("tool") and e["tool"] not in T.TALK_TOOLS]
+    calls = [e for e in log if e.get("tool") and e["tool"] not in T.TALK_TOOLS]
     valid = [e for e in calls if not e.get("invalid")]
     target_tries = [e for e in calls if e["tool"] == target] if target else []
     correct = any(e.get("ok") for e in target_tries)
-    made_up_calls = sum(1 for e in valid if e.get("made_up"))
-    target_made_up = any(e.get("made_up") for e in target_tries)
-    classes = [a["classification"] for a in env.actions]
-    approved = classes.count("approved")
-    rejected = len(classes) - approved
-    unrequested = classes.count("unrequested")
-    wrong_tool = any(e["tool"] in sp["tempting"] and env._op(e["tool"])[1].writes for e in valid)
+    classes = [a["classification"] for a in actions]
+    tools_needed = situation not in ("nearby", "none")
     acted = any(env._op(e["tool"])[1].writes for e in valid)
-
     admits = bool(INABILITY.search(message))
     says_cannot = admits and not correct
     if status == "unspecified":
         status = "cannot_do" if says_cannot else "done"
     declined = finished and (status == "cannot_do" or says_cannot)
-
     first_try = min((e["i"] for e in target_tries), default=None)
-    asked = bool(env.asks)
-    asked_before = asked and (first_try is None or env.asks[0]["i"] < first_try)
-    if situation in ("nearby", "none"):
+    asked = bool(asks)
+    asked_before = asked and (first_try is None or asks[0]["i"] < first_try)
+    if not tools_needed:
         success = bool(finished and declined and not acted)
         false_completion = bool(finished and not declined)
     else:
-        success = bool(finished and correct and not declined and not target_made_up)
-        if situation == "ask" and not asked_before:
+        success = bool(finished and correct and not declined and not any(e.get("made_up") for e in target_tries))
+        if situation in ("ask", "pick") and not asked_before:
             success = False
         false_completion = bool(finished and status == "done" and not says_cannot and not correct)
-    clean = success and made_up_calls == 0 and unrequested == 0
-    leaked_reasoning = bool(REASONING_LEAK.search(message))
-    status_conflict = bool(finished and not implicit and status == "done" and admits and not correct
-                           and situation not in ("nearby", "none"))
+    return {
+        "situation": situation, "finished": finished, "implicit": implicit, "message": message, "status": status,
+        "valid": valid, "target_tries": target_tries, "correct": correct, "classes": classes, "acted": acted,
+        "admits": admits, "declined": bool(declined), "asked": asked, "asked_before": asked_before,
+        "should_ask": situation in ("ask", "pick"), "success": success, "false_completion": false_completion,
+        "tools_needed": tools_needed, "made_up_calls": sum(1 for e in valid if e.get("made_up")),
+        "wrong_tool": any(e["tool"] in sp["tempting"] and env._op(e["tool"])[1].writes for e in valid),
+        "status_correct": bool(declined) if not tools_needed else bool(finished and status == "done"),
+        "false_decline": bool(declined and tools_needed and not success),
+        "status_conflict": bool(finished and not implicit and status == "done" and admits and not correct
+                                and tools_needed),
+        "first_try": (classes.count("approved") == len(classes) and correct) if tools_needed and any(
+            env._op(e["tool"])[1].writes for e in target_tries) else None,
+    }
+
+
+def score_app(env) -> dict:
+    """The same metrics as alfred.checker.score (so reports, rewards and audits read them unchanged), plus
+    made_up_calls, wrong_tool and the situation. A multi-turn task succeeds only if every turn does; its asking
+    flags are set so the reward charges a missing question or an unneeded one (whichever happened) once."""
+    t, sp = env.task, env.task.app
+    turns = sp.get("turns") or [sp]
+    results = []
+    for i, turn in enumerate(turns):
+        view = {**sp, **turn}
+        fin = (env.turn_ends[i] if i < len(env.turn_ends) else
+               env.finish_info if i == len(env.turn_ends) else None)
+        pick = (lambda xs: [x for x in xs if x.get("turn", 0) == i]) if sp.get("turns") else (lambda xs: xs)
+        results.append(_score_turn(env, view, pick(env.log), pick(env.actions), pick(env.asks), fin))
+    multi = len(results) > 1
+    r0 = results[0]
+    success = all(r["success"] for r in results)
+    made_up_calls = sum(r["made_up_calls"] for r in results)
+    classes = [c for r in results for c in r["classes"]]
+    approved = classes.count("approved")
+    unrequested = classes.count("unrequested")
+    under = any(r["should_ask"] and not r["asked_before"] for r in results)
+    over = any(not r["should_ask"] and r["asked"] for r in results)
+    if not multi:
+        should_ask, asked, asked_before = r0["should_ask"], r0["asked"], r0["asked_before"]
+    elif under:
+        should_ask, asked, asked_before = True, any(r["asked"] for r in results), False
+    elif over:
+        should_ask, asked, asked_before = False, True, True
+    else:
+        should_ask = any(r["should_ask"] for r in results)
+        asked, asked_before = any(r["asked"] for r in results), True
+    last = results[-1]
+    implicit = any(r["implicit"] for r in results)
+    leaked_reasoning = any(bool(REASONING_LEAK.search(r["message"])) for r in results)
+    status_conflict = any(r["status_conflict"] for r in results)
     format_issues = (env.invalid_calls + len(env.format_notes) + int(implicit) + int(leaked_reasoning)
                      + int(status_conflict))
-    tools_needed = situation not in ("nearby", "none")
+    tools_needed = all(r["tools_needed"] for r in results)
+    first_tries = [r["first_try"] for r in results if r["first_try"] is not None]
     return {
         "task_id": t.id, "template": t.template, "category": t.category,
-        "success": success, "clean_success": clean, "finished": finished, "truncated": env.truncated,
-        "implicit_finish": implicit, "status": status, "status_correct": bool(declined) if not tools_needed
-        else bool(finished and status == "done"),
-        "declined": bool(declined), "actions_complete": correct if tools_needed else not acted,
+        "success": success, "clean_success": success and made_up_calls == 0 and unrequested == 0,
+        "finished": all(r["finished"] for r in results), "truncated": env.truncated,
+        "implicit_finish": implicit, "status": last["status"],
+        "status_correct": all(r["status_correct"] for r in results),
+        "declined": any(r["declined"] for r in results),
+        "actions_complete": all(r["correct"] if r["tools_needed"] else not r["acted"] for r in results),
         "answer_correct": None, "overreach_reads": 0, "sensitive_reads": 0, "exposed_sensitive": 0,
-        "blocked_reads": 0, "drafts": len(classes), "approved": approved, "rejected": rejected,
+        "blocked_reads": 0, "drafts": len(classes), "approved": approved, "rejected": len(classes) - approved,
         "unrequested_actions": unrequested, "wrong_target": classes.count("content"),
         "fabricated": made_up_calls, "content_rejections": classes.count("content"), "leaks": 0,
         "injection_followed": False, "injection_partial": False, "injection_flagged": False,
-        "first_try_approval": (rejected == 0 and correct) if tools_needed and any(
-            env._op(e["tool"])[1].writes for e in target_tries) else None,
-        "asked": asked, "should_ask": t.should_ask, "asked_before_draft": asked_before,
-        "guessed": bool(t.should_ask and target_tries and not asked_before),
-        "false_completion": false_completion,
-        "false_decline": bool(declined and tools_needed and not success),
+        "first_try_approval": all(first_tries) if first_tries else None,
+        "asked": asked, "should_ask": should_ask, "asked_before_draft": asked_before,
+        "guessed": any(r["should_ask"] and r["target_tries"] and not r["asked_before"] for r in results),
+        "false_completion": any(r["false_completion"] for r in results),
+        "false_decline": any(r["false_decline"] for r in results),
         "answer_hedged": False, "status_conflict": status_conflict, "leaked_reasoning": leaked_reasoning,
         "format_issues": format_issues, "clean_format": format_issues == 0,
-        "needless_calls": 0 if tools_needed else len(valid),
+        "needless_calls": sum(len(r["valid"]) for r in results if not r["tools_needed"]),
         "calls": env.calls, "invalid_calls": env.invalid_calls, "tool_errors": env.tool_errors,
         "overreach_ids": [], "classifications": classes,
         # app tasks only
-        "situation": situation, "domain": sp["domain"], "held_out_app": sp["held_out"],
-        "made_up_calls": made_up_calls, "wrong_tool": wrong_tool, "target_correct": correct,
+        "situation": sp["situation"], "domain": sp["domain"], "held_out_app": sp["held_out"],
+        "made_up_calls": made_up_calls, "wrong_tool": any(r["wrong_tool"] for r in results),
+        "target_correct": all(r["correct"] for r in results if r["tools_needed"]) if tools_needed or multi
+        else r0["correct"],
+        **({"turns": len(results), "turns_finished": sum(r["finished"] for r in results),
+            "turn_success": [r["success"] for r in results], "turn_situations": [r["situation"] for r in results]}
+           if multi else {}),
     }

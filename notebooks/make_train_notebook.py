@@ -8,12 +8,12 @@ Teaches NVIDIA's Nemotron 3 Nano 4B to ask when a request is ambiguous, say "I c
 
 **Runtime:** Runtime → Change runtime type → **A100**. Run the cells in order. Everything is saved to Google Drive (`alfred-results/`), and every step resumes where it stopped, so after a disconnect just run the cells again from the top (cells that already finished skip their work).
 
-**Round 3.** Round 2's judgment held inside Alfred but didn't carry over to other apps: on When2Call it filled missing details with defaults and reached for nearby wrong tools (see the learnings doc). Round 3 adds procedural tasks in 12 other apps (files, pharmacy, orders, ...) whose tools are named differently in every task, where the right move is to call, ask for a missing detail, look an id up, or say a nearby tool can't do it; a made-up value fails the task. GRPO refills groups that teach nothing. Four apps are never trained on, for evaluation. Run every cell from the top: work finished in earlier rounds is skipped, and their results stay on Drive for comparison.
+**Round 4.** Round 3's judgment carried over to apps it never trained on, but asking for missing information only got back to the untrained level, and BFCL's multi-turn categories stayed weak (see RESULTS.md). Round 4 adds two task types in the procedural apps: conversations of two or three requests over the same tools, where a later one is missing a detail or needs a tool that isn't offered (BFCL is multi-turn; round 3's tasks were single requests), and requests that match two records, where the right move is to ask which one. It also fixes a bug that made about 13% of round 3's app eval tasks differ between eval runs, so those suites are re-run for the earlier models. Run every cell from the top: work finished in earlier rounds is skipped, and their results stay on Drive for comparison.
 
 | Cell | What | Time | Cost |
 |---|---|---|---|
 | 3 | Realistic worlds: loads the reviewed content pack from the repo | 2 min | |
-| 4 | Teacher episodes in the background (Nemotron 3 Nano 30B on Token Factory, no GPU): round 3 adds the app tasks in both interfaces | ~1 h, in the background | ~$1 of credits |
+| 4 | Teacher episodes in the background (Nemotron 3 Nano 30B on Token Factory, no GPU): round 4 adds conversations and two-match tasks | ~30 min, in the background | under $1 of credits |
 | 5 | Meanwhile, a smoke test on the GPU: 2 training steps, play a task in each interface with that adapter, one RL step | ~15 min | |
 | 6 | Baselines for the untrained 4B model on the app evals (its Alfred evals are round 2's) | ~20 min | |
 | 7 | Wait for the teacher, then build the training set | ~5 min | |
@@ -101,10 +101,10 @@ if not os.path.exists(PARSER):
                                'nano_v3_reasoning_parser.py', PARSER)
 
 MODEL, SERVED = 'nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16', 'nemotron-3-nano-4b'
-# Round 3 (this one) adds procedural app tasks and GRPO refills (see the learnings doc for why). Round 2's adapters
-# stay on Drive (train/sft-v2, train/grpo-v2) and are evaluated next to round 3's for comparison.
-DATA_FILE, SFT_DIR, GRPO_DIR = f'{TRAIN}/data-v3/sft.jsonl', f'{TRAIN}/sft-v3', f'{TRAIN}/grpo-v3'
-V2_GRPO_DIR = f'{TRAIN}/grpo-v2'
+# Round 4 (this one) adds conversations and two-match tasks (see RESULTS.md for why). Round 3's adapters stay on
+# Drive (train/sft-v3, train/grpo-v3) and are evaluated next to round 4's for comparison.
+DATA_FILE, SFT_DIR, GRPO_DIR = f'{TRAIN}/data-v4/sft.jsonl', f'{TRAIN}/sft-v4', f'{TRAIN}/grpo-v4'
+V3_GRPO_DIR = f'{TRAIN}/grpo-v3'
 EPISODES = 5 * 3  # per task type in every eval: 5 held-out worlds x 3 tries
 # How every Alfred eval in this notebook calls the 4B model: native tool calls, reasoning off, NVIDIA's
 # recommended sampling for tool calling. Training uses the same format.
@@ -219,7 +219,12 @@ ALFRED_SUITE = [('tools-real', [*REAL], N_TRAIN), ('tools-heldout-real', [*REAL,
 APP_SUITE = [('apps-text', [*TEXT, '--templates', 'apps'], N_APPS),
              ('newapps-text', [*TEXT, '--templates', 'newapps'], N_APPS),
              ('newapps-tools', ['--templates', 'newapps'], N_APPS)]
-SUITE = ALFRED_SUITE + APP_SUITE
+# Round 4's task types on training apps (in-distribution) and on the apps never trained on. Conversations are
+# always plain text; two-match tasks run in plain text here too.
+N_APPS4 = 2
+APP4_SUITE = [('apps4-text', [*TEXT, '--templates', 'apps4'], N_APPS4),
+              ('newapps4-text', [*TEXT, '--templates', 'newapps4'], N_APPS4)]
+SUITE = ALFRED_SUITE + APP_SUITE + APP4_SUITE
 
 
 def eval_suite(served, prefix, suite=SUITE):
@@ -273,7 +278,7 @@ if not os.path.exists(f'{REALISM}/check.md') or os.path.getmtime(f'{REALISM}/che
 print('Pack checked. Send alfred-results/realism/main.jsonl.gz and check.md for review before cell 4.')
 """
 
-TEACHER = r"""# 4. Teacher episodes in the background (round 3: about 1 hour, roughly $1 of Token Factory credits)
+TEACHER = r"""# 4. Teacher episodes in the background (round 4: about 30 minutes, under $1 of Token Factory credits)
 # Nemotron 3 Nano 30B plays training tasks on Token Factory (no GPU needed). Only its clean successes become training
 # data (cell 7). Already done: round 1's 9 task types in Alfred's tool interface (worlds 0-249) and round 2's 12 in
 # the plain-text interface (worlds 550-709). Round 3: the 5 app task types, plain text in worlds 710-829 and Alfred's
@@ -285,6 +290,9 @@ TEACHER_RUNS = {  # label: (first world, worlds, extra arguments, task types per
     'teacher-nano30b-text': (550, 160, [*REAL, *TEXT], N_TRAIN),
     'teacher-nano30b-apps-text': (710, 120, [*TEXT, '--templates', 'apps'], N_APPS),
     'teacher-nano30b-apps': (830, 100, ['--templates', 'apps'], N_APPS),
+    # Round 4: conversations (always plain text) and two-match tasks, and two-match tasks in the tool interface.
+    'teacher-nano30b-apps4-text': (0, 150, [*TEXT, '--templates', 'apps4'], N_APPS4),
+    'teacher-nano30b-pick': (150, 100, ['--templates', 'app_pick'], 1),
 }
 for label, (start, n, extra, per_world) in TEACHER_RUNS.items():
     if not finished(label, n * per_world):
@@ -318,14 +326,16 @@ print(open(DATA_FILE.replace('.jsonl', '.md')).read())
 BASELINE = r"""# 6. Baselines (about 20 minutes): the untrained 4B model on the app evals. Its Alfred evals are round 2's (r2-base).
 serve()
 eval_suite(SERVED, 'r2-base', ALFRED_SUITE)  # already done in round 2: skipped
-eval_suite(SERVED, 'r3-base', APP_SUITE)
+eval_suite(SERVED, 'r3-base', APP_SUITE)  # done in round 3
+# The app suites again under the fixed task generator (round 3's varied between runs), plus round 4's new ones.
+eval_suite(SERVED, 'r4-base', APP_SUITE + APP4_SUITE)
 """
 
 SMOKE = r"""# 5. Smoke test of the training stack while the teacher runs (about 15 minutes)
 # Two SFT steps on 8 scripted conversations, load that adapter into vLLM and play one task with it in each interface,
 # then one tiny GRPO step. If anything in the setup is wrong (model loading, Mamba kernels, LoRA in vLLM, GPU memory
 # while both run), it shows up here instead of hours into training.
-SMOKE = '/content/smoke-v3'
+SMOKE = '/content/smoke-v4'
 if not os.path.exists(f'{SMOKE}/done'):
     stop_serving()
     alfred('train.data', '--oracle-worlds', '600-601', '--realistic-share', 0.5, '--text-share', 0.5,
@@ -335,10 +345,10 @@ if not os.path.exists(f'{SMOKE}/done'):
     serve(f'alfred-smoke={SMOKE}/sft/adapter', gpu=0.42)
     for interface in ([], TEXT):
         alfred('eval', '--models', 'alfred-smoke', *NATIVE, *REAL, *interface, '--worlds', 1,
-               '--templates', 'event_time_lookup,missing_content,app_ask,app_nearby', '--out', f'{SMOKE}/eval')
+               '--templates', 'event_time_lookup,missing_content,app_ask,app_pick,app_multi', '--out', f'{SMOKE}/eval')
     alfred('train.grpo', '--model', MODEL, '--init-adapter', f'{SMOKE}/sft/adapter', '--out', f'{SMOKE}/grpo',
            '--steps', 1, '--tasks', 2, '--group', 4, '--val-every', 1000, '--val-worlds', 1,
-           '--templates', 'missing_content,app_ask,app_lookup', '--refill-rounds', 1)
+           '--templates', 'missing_content,app_ask,app_pick,app_multi', '--refill-rounds', 1)
     open(f'{SMOKE}/done', 'w').write('ok')
 print('Smoke test passed.')
 """
@@ -354,11 +364,11 @@ print(open(f'{SFT_DIR}/log.jsonl').read().splitlines()[-1])
 """
 
 EVAL_SFT = r"""# 9. Evaluate the fine-tuned model (about 1 hour)
-serve(f'alfred-sft3={SFT_DIR}/adapter')
-eval_suite('alfred-sft3', 'r3-sft3')
-suite_reports('sft3', 'r2-base', 'r3-base', 'r2-sft2', 'r3-sft3')
-for suffix in ('text-heldout-real', 'newapps-text'):
-    print(open(f'{TRAIN}/report-sft3-{suffix}.md').read())
+serve(f'alfred-sft4={SFT_DIR}/adapter')
+eval_suite('alfred-sft4', 'r4-sft4')
+suite_reports('sft4', 'r2-base', 'r4-base', 'r4-sft4')
+for suffix in ('text-heldout-real', 'newapps-text', 'newapps4-text'):
+    print(open(f'{TRAIN}/report-sft4-{suffix}.md').read())
 """
 
 GRPO = r"""# 10. Reinforcement learning (GRPO) against the environment (about 3-6 hours; resumes after a disconnect)
@@ -383,12 +393,12 @@ print(open(f'{GRPO_DIR}/audit.md').read())
 """
 
 EVAL_FINAL = r"""# 11. Final evaluation: Alfred tasks, held-out task types, and the outside benchmarks (about 3 hours)
-# Round 3's models next to round 2's (its Alfred evals are from round 2; its app evals run here), so the report shows
-# what round 3 changed.
-serve(f'alfred-sft3={SFT_DIR}/adapter', f'alfred-rl3={GRPO_DIR}/best', f'alfred-rl2={V2_GRPO_DIR}/best')
-eval_suite('alfred-rl3', 'r3-rl3')
-eval_suite('alfred-rl2', 'r3-rl2', APP_SUITE)
-suite_reports('final', 'r2-base', 'r3-base', 'r2-rl2', 'r3-rl2', 'r3-sft3', 'r3-rl3')
+# Round 4's models next to round 3's. Round 3's email-task evals are reused (those tasks never varied); its app evals
+# run again here on the fixed generator, so every model is compared on exactly the same app tasks.
+serve(f'alfred-sft4={SFT_DIR}/adapter', f'alfred-rl4={GRPO_DIR}/best', f'alfred-rl3={V3_GRPO_DIR}/best')
+eval_suite('alfred-rl4', 'r4-rl4')
+eval_suite('alfred-rl3', 'r4-rl3', APP_SUITE + APP4_SUITE)
+suite_reports('final4', 'r2-base', 'r4-base', 'r3-rl3', 'r4-rl3', 'r4-sft4', 'r4-rl4')
 
 # Outside benchmarks the model never trained on, in their own environment (their packages pin other versions).
 if not os.path.exists('/content/benchenv/bin/python'):
@@ -405,12 +415,12 @@ def external(module, *args):
        + ' '.join(shlex.quote(str(a)) for a in args))
 
 
-# When2Call is quick, so both of round 3's models; the two agent benchmarks take longer, so the final model only.
+# When2Call is quick, so both of round 4's models; the two agent benchmarks take longer, so the final model only.
 # (Round 2's results are already in the same folder, so the summary shows both rounds.)
-for name in ('alfred-sft3', 'alfred-rl3'):
+for name in ('alfred-sft4', 'alfred-rl4'):
     external('when2call', '--model', name, '--base-url', 'vllm', '--no-think', *JUDGE, '--out', EXT)
-external('bfcl_bench', '--model', 'alfred-rl3', '--base-url', 'vllm', '--no-think', '--workers', 32, '--out', EXT)
-external('agentdojo_bench', '--model', 'alfred-rl3', '--base-url', 'vllm', '--no-think', '--out', EXT)
+external('bfcl_bench', '--model', 'alfred-rl4', '--base-url', 'vllm', '--no-think', '--workers', 32, '--out', EXT)
+external('agentdojo_bench', '--model', 'alfred-rl4', '--base-url', 'vllm', '--no-think', '--out', EXT)
 external('summary', EXT, '--out', f'{EXT}/report.md')
 print(open(f'{EXT}/report.md').read())
 """
@@ -420,14 +430,16 @@ PACKAGE = r"""# 12. Package everything to send back (about 1 minute)
 # the training data itself stay on Drive.
 os.chdir(OUT)
 patterns = ['train/*.md', 'realism/main.build.md', 'realism/check.md', 'external/report.md', 'external/*/summary.*']
-for d in ('', '-v2', '-v3'):  # every round
+for d in ('', '-v2', '-v3', '-v4'):  # every round
     patterns += [f'train/data{d}/*.md', f'train/sft{d}/log.jsonl', f'train/sft{d}/args.json', f'train/grpo{d}/log.jsonl',
                  f'train/grpo{d}/args.json', f'train/grpo{d}/val/*', f'train/grpo{d}/episodes/*',
                  f'train/grpo{d}/best/val.json', f'train/grpo{d}/audit.md']
 files = [f for p in patterns for f in glob.glob(p)]
 # A few AgentDojo episodes as they happened (clean runs of the first user tasks), to see how the model ends a task.
 files += sorted(glob.glob('external/agentdojo-*/logs/**/user_task_[0-4]/none/none.json', recursive=True))[:20]
-new_runs = [d for d in glob.glob('runs/*') if any(k in d for k in ('-r3-', '-teacher-nano30b-apps'))]
+new_runs = [d for d in glob.glob('runs/*') if any(k in d for k in ('-r4-', '-teacher-nano30b-apps4', '-teacher-nano30b-pick'))]
+# Every When2Call model reply, so each judged item can be checked (round 3 shipped only the summaries).
+files += glob.glob('external/when2call-*/responses.jsonl')
 files += glob.glob('train/report-*.md')
 subprocess.run(['rm', '-f', 'train-results.zip'])
 subprocess.run(['zip', '-qr', 'train-results.zip', *files, *new_runs], check=True)
@@ -442,8 +454,10 @@ EXPORT = r"""# 13. Export for laptops (about 40 minutes): merge, convert to GGUF
 # quantization" is measured.
 FINAL = f'{TRAIN}/alfred-nemotron-3-nano-4b'
 stop_serving()
+# The adapter to ship: round 4's by default. If round 4 didn't beat round 3 on the same evals, use V3_GRPO_DIR.
+EXPORT_FROM = GRPO_DIR
 if not os.path.exists(f'{FINAL}/alfred_merge.json'):
-    alfred('train.export', '--model', MODEL, '--adapter', f'{GRPO_DIR}/best', '--out', FINAL)
+    alfred('train.export', '--model', MODEL, '--adapter', f'{EXPORT_FROM}/best', '--out', FINAL)
 LLAMA = '/content/llama.cpp'
 if not os.path.exists(f'{LLAMA}/build/bin/llama-server'):
     sh(f'git clone -q --depth 1 https://github.com/ggml-org/llama.cpp {LLAMA}')
@@ -473,13 +487,13 @@ try:
     Q4_RUN = ['--base-url', 'http://localhost:8090/v1', '--tool-mode', 'native', '--no-think', '--temperature', 0.6,
               '--extra-body', '{"top_p": 0.95}', '--workers', 8]
     for suffix, args, n in [*ALFRED_SUITE[::2], APP_SUITE[1]]:  # trained Alfred types in each interface; new apps
-        label = f'r3-rl3-q4-{suffix}'
+        label = f'r4-rl4-q4-{suffix}'
         if not finished(label, n * EPISODES):
             alfred('eval', '--models', 'alfred-q4', *Q4_RUN, *args, '--worlds', 5, '--samples', 3, *resume(label))
 finally:
     llama.terminate()
 for suffix, _, _ in [*ALFRED_SUITE[::2], APP_SUITE[1]]:
-    alfred('report', *runs(f'r3-rl3-{suffix}', f'r3-rl3-q4-{suffix}'), '--out', f'{TRAIN}/report-q4-{suffix}.md')
+    alfred('report', *runs(f'r4-rl4-{suffix}', f'r4-rl4-q4-{suffix}'), '--out', f'{TRAIN}/report-q4-{suffix}.md')
 
 # Publish to Hugging Face (optional): the merged model and the GGUF, so anyone can run it.
 hf_token = secret('HF_TOKEN')

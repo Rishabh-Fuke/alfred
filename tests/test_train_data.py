@@ -114,5 +114,8 @@ def test_end_to_end_from_a_teacher_run(tmp_path):
     assert {r["task_id"] for r in train}.isdisjoint({r["task_id"] for r in val})
     for r in rows:
         assert r["world_seed"] in TRAIN_WORLDS and r["tools"] and len(r["train"]) >= 1
-        assert r["messages"][-1]["tool_calls"][0]["function"]["name"] == "finish"
+        if r["interface"] == "tools":
+            assert r["messages"][-1]["tool_calls"][0]["function"]["name"] == "finish"
+        else:  # conversations (app_multi) are always plain text: they end with a reply
+            assert r["messages"][-1]["role"] == "assistant" and r["messages"][-1]["content"]
     assert "| ambiguous_recipient |" in out.with_suffix(".md").read_text()
