@@ -322,3 +322,29 @@ def test_round_four_templates_stay_out_of_round_three_suites():
         _check_templates(list(APP4_HELDOUT_TEMPLATES))
     for t in generate_tasks(0, 40, ["app_multi", "app_pick"]):
         assert {o["domain"] for o in t.app["tool_ops"].values()} <= set(TRAIN)
+
+
+@pytest.mark.parametrize("interface", INTERFACES)
+def test_a_required_field_nobody_mentioned_must_be_asked_for(interface):
+    """When2Call's commonest miss after round 3: a complete-sounding request, a tool that requires one more field,
+    and a plausible default filled in. Here even the field's usual default counts as made up."""
+    for task in generate_tasks(0, 20, ["app_require"], interface=interface):
+        sp = task.app
+        key = sp["require"][0]
+        fn = next(x["function"] for x in sp["tools"] if x["function"]["name"] == sp["target"])
+        pname = next(p for p, k in sp["tool_ops"][sp["target"]]["params"].items() if k == key)
+        assert pname in fn["parameters"]["required"] and "Defaults to" not in fn["parameters"]["properties"][pname]["description"]
+        assert key not in sp["revealed"] and pname in sp["expected"]
+        _, good = _run(task, OracleAgent())
+        _, bad = _run(task, GuessAgent())
+        assert good["clean_success"] and not bad["success"] and bad["guessed"], task.id
+        default = TRAIN[sp["domain"]].params[key].default
+        if default is not None and str(default) != str(sp["expected"][pname]):
+            env = make_env(task)
+            env.reset()
+            props = fn["parameters"]["properties"]
+            args = {k: (float(v) if props[k]["type"] == "number" else int(float(v)) if props[k]["type"] == "integer"
+                        else v) for k, v in sp["expected"].items()}
+            args[pname] = int(default) if props[pname]["type"] == "integer" else default
+            env.call_tool(sp["target"], args)
+            assert env.log[-1]["checks"][pname] == "made_up", (task.id, env.log[-1]["checks"])

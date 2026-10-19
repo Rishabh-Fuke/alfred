@@ -11,6 +11,9 @@ Five situations, each a habit that should carry over to any app:
 - none:    nothing on offer fits at all (the tools are another app's). Say it can't be done.
 - pick:    the record the user names matches two that a list tool shows ("the running shoes order", and there are
            two). Ask which one; a guess is rejected without being told the right one.
+- require: the request is complete as a person would say it, but this tool requires a field they didn't mention
+           (a file type, a quantity, units), with no documented default. Ask; even the usual default fails. This
+           is When2Call's commonest miss after round 3: a plausible default filled into a field nobody gave.
 
 make_multi_spec chains two or three of these in one conversation over the same tools, the way BFCL's multi-turn
 tasks work: a later request can be missing a detail, or need a tool that isn't offered.
@@ -27,7 +30,8 @@ from datetime import date, timedelta
 from .catalog import HELDOUT, TRAIN, Domain, Entity, Op, Param
 from .values import say_date, say_number, say_time
 
-SITUATIONS = ("call", "ask", "lookup", "nearby", "none", "pick")
+SITUATIONS = ("call", "ask", "lookup", "nearby", "none", "pick", "require")
+REQUIRABLE = ("enum", "integer", "string", "date", "time", "amount")  # kinds a person can just tell you
 NAME_STYLES = ("snake", "camel", "prefixed", "pascal", "double")
 _SLOT = re.compile(r"\{(\w+)\}")
 
@@ -57,8 +61,9 @@ def param_name(p: Param, style: str, rng: random.Random) -> str:
 _JSON_TYPES = {"integer": "integer", "amount": "number", "boolean": "boolean"}
 
 
-def schema(d: Domain, op: Op, name: str, style: str, rng: random.Random) -> tuple[dict, dict]:
-    """The tool's schema and its parameter names (schema name -> catalog key)."""
+def schema(d: Domain, op: Op, name: str, style: str, rng: random.Random, require=()) -> tuple[dict, dict]:
+    """The tool's schema and its parameter names (schema name -> catalog key). require: optional parameters this
+    tool makes required, with no default said."""
     props, required, names = {}, [], {}
     for key in op.req + op.opt:
         p = d.params[key]
@@ -71,16 +76,16 @@ def schema(d: Domain, op: Op, name: str, style: str, rng: random.Random) -> tupl
             desc += " Format: YYYY-MM-DD."
         if p.kind == "time" and "HH" not in desc and rng.random() < 0.6:
             desc += " Format: HH:MM."
-        if p.default is not None and key in op.opt:
+        if p.default is not None and key in op.opt and key not in require:
             shown = str(p.default).lower() if isinstance(p.default, bool) else p.default
             desc += f" Defaults to {shown}."
-        if key in op.req and rng.random() < 0.3:
+        if (key in op.req or key in require) and rng.random() < 0.3:
             desc = "Required. " + desc
         prop = {"type": _JSON_TYPES.get(p.kind, "string"), "description": desc}
         if p.kind == "enum":
             prop["enum"] = list(p.values)
         props[pname] = prop
-        if key in op.req:
+        if key in op.req or key in require:
             required.append(pname)
     fn = {"name": name, "description": rng.choice(op.desc),
           "parameters": {"type": "object", "properties": props, "required": required}}
@@ -212,6 +217,8 @@ def eligible(d: Domain, op: Op, situation: str) -> bool:
     if situation == "pick":
         return any(d.params[k].kind == "id" and _lister(d, d.params[k].entity, op) and _pickable(d.entities[
             d.params[k].entity]) for k in op.req)
+    if situation == "require":
+        return bool(op.say) and any(d.params[k].kind in REQUIRABLE for k in op.opt)
     raise ValueError(situation)
 
 
@@ -286,6 +293,10 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
 
     missing: list[str] = []
     lookup_key = ""
+    require: tuple = ()
+    if situation == "require":
+        require = (rng.choice([k for k in op.opt if d.params[k].kind in REQUIRABLE]),)
+        missing = list(require)
     if situation == "ask":
         droppable = [k for k in op.req if d.params[k].kind != "id" and _can_drop(op, k)]
         missing = rng.sample(droppable, 2 if len(droppable) > 1 and rng.random() < 0.2 else 1)
@@ -313,7 +324,7 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         if twin["id"] == rec["id"]:
             return None
 
-    optional_wanted = {k for k in op.opt if rng.random() < 0.5}
+    optional_wanted = {k for k in op.opt if rng.random() < 0.5} - set(require)
     want = (set(op.req) - set(missing)) | optional_wanted
     template = rng.choice(op.say)
     text, said = _render(template, want, rng)
@@ -353,19 +364,19 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         name = tool_name(dd, oo, style, rng)
         while name in tool_ops:
             name = tool_name(dd, oo, "prefixed" if style != "prefixed" else "double", rng)
-        sch, pnames = schema(dd, oo, name, style, rng)
+        sch, pnames = schema(dd, oo, name, style, rng, require=require if (dd is d and oo is op) else ())
         tools.append(sch)
         tool_ops[name] = {"domain": dd.key, "op": oo.key, "params": pnames, "writes": oo.writes}
         by_op[(dd.key, oo.key)] = name
 
-    target = by_op.get((d.key, op.key)) if situation in ("call", "ask", "lookup", "pick") else None
+    target = by_op.get((d.key, op.key)) if situation in ("call", "ask", "lookup", "pick", "require") else None
     expected = {}
     if target:
         inverse = {v: k for k, v in tool_ops[target]["params"].items()}
         for k in op.req:
             expected[inverse[k]] = values[k]
         for k in op.opt:
-            if k in said:
+            if k in said or k in require:
                 expected[inverse[k]] = values[k]
     answer = (_answer([(d.params[k].label, say(d.params[k], values[k], today, rng)) for k in missing], rng)
               if missing else None)
@@ -398,7 +409,7 @@ def _try(d: Domain, op: Op, situation: str, held_out: bool, today: date, user: d
         "answer": answer, "revealed": revealed,
         "lookup": by_op[(d.key, _lister(d, d.params[lookup_key].entity, op).key)] if lookup_key else None,
         "lookup_param": lookup_key or None,
-        "records": records, "tempting": tempting, "pick": pick,
+        "records": records, "tempting": tempting, "pick": pick, "require": list(require),
     }
 
 
@@ -418,7 +429,7 @@ def system_prompt(user: dict, today: date, app: str, rng: random.Random) -> str:
 # ----------------------------------------------------------------------------- multi-turn conversations
 
 TURN_OPENERS = ("Thanks! ", "Great, thanks. ", "One more thing: ", "Also, ", "Next: ", "")
-LATER_SITUATIONS = ("ask", "ask", "nearby", "nearby", "call", "lookup")  # later turns lean toward the hard cases
+LATER_SITUATIONS = ("ask", "require", "nearby", "nearby", "call", "lookup")  # later turns lean toward the hard cases
 
 
 def _continue(opener: str, request: str) -> str:
@@ -483,7 +494,7 @@ def _merge_turns(turns: list[dict], rng: random.Random) -> dict | None:
 
         target = rename[t["target"]] if t["target"] else None
         turn = {k: t[k] for k in ("situation", "op", "op_label", "domain", "missing", "missing_labels", "answer",
-                                  "revealed", "lookup_param", "pick")}
+                                  "revealed", "lookup_param", "pick", "require")}
         turn.update(target=target, expected=params(t["target"], t["expected"]) if t["target"] else {},
                     lookup=rename[t["lookup"]] if t["lookup"] else None,
                     tempting=[rename[x] for x in t["tempting"]],
@@ -518,4 +529,5 @@ def _merge_turns(turns: list[dict], rng: random.Random) -> dict | None:
             "situation": "multi", "op": first["op"], "op_label": first["op_label"], "request": first["request"],
             "system": base["system"], "tools": tools, "tool_ops": tool_ops, "records": records,
             "turns": out_turns, **{k: first[k] for k in ("target", "expected", "missing", "missing_labels", "answer",
-                                                          "revealed", "lookup", "lookup_param", "tempting", "pick")}}
+                                                          "revealed", "lookup", "lookup_param", "tempting", "pick",
+                                                          "require")}}

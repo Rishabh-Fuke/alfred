@@ -8,7 +8,7 @@ Teaches NVIDIA's Nemotron 3 Nano 4B to ask when a request is ambiguous, say "I c
 
 **Runtime:** Runtime → Change runtime type → **A100**. Run the cells in order. Everything is saved to Google Drive (`alfred-results/`), and every step resumes where it stopped, so after a disconnect just run the cells again from the top (cells that already finished skip their work).
 
-**Round 4.** Round 3's judgment carried over to apps it never trained on, but asking for missing information only got back to the untrained level, and BFCL's multi-turn categories stayed weak (see RESULTS.md). Round 4 adds two task types in the procedural apps: conversations of two or three requests over the same tools, where a later one is missing a detail or needs a tool that isn't offered (BFCL is multi-turn; round 3's tasks were single requests), and requests that match two records, where the right move is to ask which one. It also fixes a bug that made about 13% of round 3's app eval tasks differ between eval runs, so those suites are re-run for the earlier models. Run every cell from the top: work finished in earlier rounds is skipped, and their results stay on Drive for comparison.
+**Round 4.** Round 3's judgment carried over to apps it never trained on, but asking for missing information only got back to the untrained level, and BFCL's multi-turn categories stayed weak (see RESULTS.md). Round 4 adds three task types in the procedural apps: requests that sound complete but whose tool requires a field nobody mentioned (round 3's commonest When2Call miss was filling such a field with a plausible default), requests that match two records, where the right move is to ask which one, and conversations of two or three requests over the same tools, where a later one is missing a detail or needs a tool that isn't offered (BFCL is multi-turn; round 3's tasks were single requests). It also fixes a bug that made about 13% of round 3's app eval tasks differ between eval runs, so those suites are re-run for the earlier models. Run every cell from the top: work finished in earlier rounds is skipped, and their results stay on Drive for comparison.
 
 | Cell | What | Time | Cost |
 |---|---|---|---|
@@ -219,9 +219,10 @@ ALFRED_SUITE = [('tools-real', [*REAL], N_TRAIN), ('tools-heldout-real', [*REAL,
 APP_SUITE = [('apps-text', [*TEXT, '--templates', 'apps'], N_APPS),
              ('newapps-text', [*TEXT, '--templates', 'newapps'], N_APPS),
              ('newapps-tools', ['--templates', 'newapps'], N_APPS)]
-# Round 4's task types on training apps (in-distribution) and on the apps never trained on. Conversations are
-# always plain text; two-match tasks run in plain text here too.
-N_APPS4 = 2
+# Round 4's task types (two-match, a field the tool requires that wasn't said, conversations) on training apps
+# (in-distribution) and on the apps never trained on. Conversations are always plain text; the others run in plain
+# text here too.
+N_APPS4 = 3
 APP4_SUITE = [('apps4-text', [*TEXT, '--templates', 'apps4'], N_APPS4),
               ('newapps4-text', [*TEXT, '--templates', 'newapps4'], N_APPS4)]
 SUITE = ALFRED_SUITE + APP_SUITE + APP4_SUITE
@@ -292,7 +293,7 @@ TEACHER_RUNS = {  # label: (first world, worlds, extra arguments, task types per
     'teacher-nano30b-apps': (830, 100, ['--templates', 'apps'], N_APPS),
     # Round 4: conversations (always plain text) and two-match tasks, and two-match tasks in the tool interface.
     'teacher-nano30b-apps4-text': (0, 150, [*TEXT, '--templates', 'apps4'], N_APPS4),
-    'teacher-nano30b-pick': (150, 100, ['--templates', 'app_pick'], 1),
+    'teacher-nano30b-pick': (150, 100, ['--templates', 'app_pick,app_require'], 2),
 }
 for label, (start, n, extra, per_world) in TEACHER_RUNS.items():
     if not finished(label, n * per_world):

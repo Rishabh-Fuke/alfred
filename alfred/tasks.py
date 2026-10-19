@@ -695,7 +695,7 @@ def _app_template(situation: str, held_out: bool):
     """A procedural app task (alfred.apps): the same five situations in apps other than email and calendar.
     app_* draw from the training apps; newapp_* from apps never trained on, for evaluation only."""
     category = {"call": "action", "lookup": "action", "ask": "ambiguous", "nearby": "impossible",
-                "none": "impossible", "pick": "ambiguous"}[situation]
+                "none": "impossible", "pick": "ambiguous", "require": "ambiguous"}[situation]
 
     def make(w: World, r: random.Random) -> dict:
         from .apps.build import make_spec
@@ -709,10 +709,12 @@ def _app_template(situation: str, held_out: bool):
             "nearby": f"Say it can't {spec['op_label']}; don't use {', '.join(spec['tempting'])} instead.",
             "none": f"Say it can't {spec['op_label']}: no tool on offer fits.",
             "pick": f"Two records match; ask which one before calling {spec['target']}.",
+            "require": f"{spec['target']} requires the {' and '.join(spec['missing_labels'])}, which wasn't said; ask "
+                       f"instead of filling in a default.",
         }[situation]
         return dict(category=category, instruction=spec["request"], summary=summary,
                     expected_status="cannot_do" if situation in ("nearby", "none") else "done",
-                    should_ask=situation in ("ask", "pick"), clarification=spec["answer"],
+                    should_ask=situation in ("ask", "pick", "require"), clarification=spec["answer"],
                     tools_needed=situation not in ("nearby", "none"), app=spec)
     make.__name__ = f"{'newapp' if held_out else 'app'}_{situation}"
     return make
@@ -725,10 +727,11 @@ def _multi_template(held_out: bool):
         from .apps.build import make_multi_spec
         spec = make_multi_spec(f"{w.seed}:multi:{'new' if held_out else 'train'}", held_out, w.now.date(), w.user)
         kinds = [t["situation"] for t in spec["turns"]]
-        category = "ambiguous" if "ask" in kinds else "impossible" if "nearby" in kinds else "action"
+        asks = {"ask", "pick", "require"} & set(kinds)
+        category = "ambiguous" if asks else "impossible" if "nearby" in kinds else "action"
         return dict(category=category, instruction=spec["request"], interface="text",
                     summary=" Then: ".join(f"{t['situation']} ({t['op']})" for t in spec["turns"]),
-                    should_ask="ask" in kinds, clarification=spec["answer"], app=spec)
+                    should_ask=bool(asks), clarification=spec["answer"], app=spec)
     make.__name__ = f"{'newapp' if held_out else 'app'}_multi"
     return make
 
@@ -739,8 +742,10 @@ APP_TEMPLATES = {f"app_{s}": _app_template(s, False) for s in APP_SITUATIONS}
 APP_HELDOUT_TEMPLATES = {f"newapp_{s}": _app_template(s, True) for s in APP_SITUATIONS}
 # Added in round 4, kept apart so the round-3 suites ("apps", "newapps") stay exactly the same tasks: two records
 # that match (ask which one), and multi-turn conversations.
-APP4_TEMPLATES = {"app_pick": _app_template("pick", False), "app_multi": _multi_template(False)}
-APP4_HELDOUT_TEMPLATES = {"newapp_pick": _app_template("pick", True), "newapp_multi": _multi_template(True)}
+APP4_TEMPLATES = {"app_pick": _app_template("pick", False), "app_require": _app_template("require", False),
+                  "app_multi": _multi_template(False)}
+APP4_HELDOUT_TEMPLATES = {"newapp_pick": _app_template("pick", True), "newapp_require": _app_template("require", True),
+                          "newapp_multi": _multi_template(True)}
 EVAL_ONLY_TEMPLATES = {**HELDOUT_TEMPLATES, **APP_HELDOUT_TEMPLATES, **APP4_HELDOUT_TEMPLATES}
 ALL_TEMPLATES = {**TEMPLATES, **HELDOUT_TEMPLATES, **APP_TEMPLATES, **APP_HELDOUT_TEMPLATES, **APP4_TEMPLATES,
                  **APP4_HELDOUT_TEMPLATES}

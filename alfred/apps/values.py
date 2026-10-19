@@ -215,8 +215,9 @@ class Known:
         self.add_text(str(value))
 
 
-def grounded(kind: str, value, known: Known, default=None, options=()) -> bool:
-    """Whether an argument value came from something the agent was told (or is the documented default)."""
+def grounded(kind: str, value, known: Known, default=None, options=(), allow_any: bool = True) -> bool:
+    """Whether an argument value came from something the agent was told (or is the documented default). allow_any:
+    "any" or "all" counts as no preference; not for a field the tool requires and nobody mentioned."""
     if value is None:
         return True
     if default is not None and same(kind, default, value, known.today):
@@ -224,7 +225,7 @@ def grounded(kind: str, value, known: Known, default=None, options=()) -> bool:
     if kind == "text":  # words the agent writes itself: fine if they mostly say what it was told, made up if not
         words = tokens(value)                                                     # ("as discussed")
         return not words or len(words & known.words) >= 0.5 * len(words)
-    if isinstance(value, str) and norm_enum(value) in ANY_WORDS and kind in ("enum", "string"):
+    if allow_any and isinstance(value, str) and norm_enum(value) in ANY_WORDS and kind in ("enum", "string"):
         return True
     if kind == "date":
         d = parse_date(value, known.today)

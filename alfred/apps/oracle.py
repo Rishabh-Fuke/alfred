@@ -91,7 +91,7 @@ def _turn(agent, env) -> tuple[str, str]:
     target = sp["target"]
     props = _props(env, target)
     args = dict(sp["expected"])
-    if situation == "ask":
+    if situation in ("ask", "require"):
         made_up = agent.fill_missing(env, sp)
         if made_up is None:
             params = [d.params[k] for k in sp["missing"]]
