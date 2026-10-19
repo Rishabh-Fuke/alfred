@@ -15,7 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .env import Environment
+from .env import Environment, make_env
 from .report import render_markdown, summarize
 from .reward import compute_reward
 from .tasks import generate_tasks
@@ -32,7 +32,7 @@ def task_for(task_id: str, template: str, style: str = "base", pack: str = "", i
 def replay(traj: dict, row: dict, config: dict) -> Environment:
     task = task_for(row["task_id"], row["template"], config.get("style", "base"), config.get("pack") or "",
                     config.get("interface", "tools"))
-    env = Environment(task, prompt=row["prompt"], max_steps=config.get("max_steps", 20),
+    env = make_env(task, prompt=row["prompt"], max_steps=config.get("max_steps", 20),
                       read_policy=config.get("read_policy", "log"), feedback=config.get("feedback", "reason"),
                       tool_mode=row.get("tool_mode", "native"))
     env.reset()

@@ -53,10 +53,13 @@ def compute_reward(m: dict | None, weights: dict | None = None, cap: int = 5) ->
     r += w["fabricated"] * min(m.get("fabricated", 0), cap)
     r += w["false_completion"] * m["false_completion"]
     r += w["false_decline"] * m.get("false_decline", False)
-    if m["should_ask"] and not m["asked_before_draft"]:
-        r += w["under_ask"]
-    if not m["should_ask"] and m["asked"]:
-        r += w["over_ask"]
+    if "under_asks" in m:  # app tasks count them per request (a conversation can get several wrong)
+        r += w["under_ask"] * m["under_asks"] + w["over_ask"] * m["over_asks"]
+    else:
+        if m["should_ask"] and not m["asked_before_draft"]:
+            r += w["under_ask"]
+        if not m["should_ask"] and m["asked"]:
+            r += w["over_ask"]
     r += w["format_issue"] * min(m.get("format_issues", m.get("invalid_calls", 0)), cap)
     r += w["needless_call"] * min(m.get("needless_calls", 0), 3)
     return max(-1.0, min(1.0, round(r, 4)))

@@ -348,3 +348,52 @@ def test_a_required_field_nobody_mentioned_must_be_asked_for(interface):
             args[pname] = int(default) if props[pname]["type"] == "integer" else default
             env.call_tool(sp["target"], args)
             assert env.log[-1]["checks"][pname] == "made_up", (task.id, env.log[-1]["checks"])
+
+
+def test_a_require_turn_in_a_conversation_sees_the_field_required():
+    """Review fix: the conversation keeps the first schema built for each op, which could be an earlier turn's copy
+    with the field optional (even "Defaults to today"); 23 of 42 require turns were like that."""
+    seen = 0
+    for t in generate_tasks(0, 150, ["app_multi"]):
+        for turn in t.app["turns"]:
+            if turn["situation"] == "require":
+                seen += 1
+                fn = next(x["function"] for x in t.app["tools"] if x["function"]["name"] == turn["target"])
+                assert set(turn["expected"]) <= set(fn["parameters"]["required"]), t.id
+                pname = next(p for p, k in t.app["tool_ops"][turn["target"]]["params"].items()
+                             if k == turn["require"][0])
+                assert "Defaults to" not in fn["parameters"]["properties"][pname]["description"], t.id
+    assert seen >= 8
+
+
+def test_a_conversation_gets_the_step_budget_once_per_request():
+    t = next(t for t in generate_tasks(0, 40, ["app_multi"]) if len(t.app["turns"]) == 3)
+    env = make_env(t, max_steps=12)
+    env.reset()
+    assert env.max_steps == 36 and env.max_calls == 108
+
+
+def test_every_wrong_question_in_a_conversation_costs():
+    hit = 0
+    for t in generate_tasks(0, 200, ["app_multi"]):
+        asks = sum(turn["situation"] in ("ask", "require") for turn in t.app["turns"])
+        if asks < 2:
+            continue
+        hit += 1
+        _, bad = _run(t, GuessAgent())
+        assert bad["under_asks"] == asks, t.id
+    assert hit >= 3
+    single = next(iter(generate_tasks(0, 1, ["app_ask"])))
+    _, m = _run(single, GuessAgent())
+    assert m["under_asks"] == 1 and m["over_asks"] == 0  # one request: the same as the old flags
+
+
+def test_rescore_regrades_app_runs(tmp_path):
+    from alfred import eval as alfred_eval
+    from alfred.rescore import rescore_run
+    run = alfred_eval.main(["--agent", "oracle", "--worlds", "1", "--templates", "app_call,app_require,app_multi",
+                            "--interface", "text", "--out", str(tmp_path / "runs")])
+    out, mismatches = rescore_run(run, tmp_path / "rescored")
+    assert not mismatches
+    rows = [json.loads(x) for x in (out / "results.jsonl").read_text().splitlines()]
+    assert len(rows) == 3 and all(r["metrics"]["clean_success"] for r in rows)

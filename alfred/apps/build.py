@@ -522,6 +522,12 @@ def _merge_turns(turns: list[dict], rng: random.Random) -> dict | None:
     for turn in out_turns:  # a tool a turn says isn't there must not have been offered by another turn
         if turn["situation"] in ("nearby", "none") and (turn["domain"], turn["op"]) in by_op:
             return None
+        if turn["situation"] == "require":
+            # The kept tool may be an earlier turn's copy, built without this turn's extra required field (and
+            # maybe saying its default): the model would see an optional field and be graded for not asking.
+            fn = next(x["function"] for x in tools if x["function"]["name"] == turn["target"])
+            if not set(turn["expected"]) <= set(fn["parameters"]["required"]):
+                return None
         if turn["situation"] == "nearby" and not turn["tempting"]:
             return None
     first = out_turns[0]
