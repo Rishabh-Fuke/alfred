@@ -28,7 +28,7 @@ tags:
 
 # Alfred 4B
 
-**A 4B model that beats NVIDIA's 120B Nemotron 3 Super at knowing when to act, when to ask, and when to say it can't:** 0.70 vs 0.60 macro F1 on NVIDIA's When2Call benchmark.
+**A 4B model that outperforms NVIDIA's 120B Nemotron 3 Super at knowing when to act, when to ask, and when to say it can't:** 0.70 vs 0.60 macro F1 on NVIDIA's When2Call benchmark.
 
 A 4B-parameter assistant model trained for **judgment in tool use**: call a tool when everything it needs was said,
 ask when a required detail is missing, look things up instead of guessing, and say "I can't" when no tool fits.
