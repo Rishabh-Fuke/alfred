@@ -1,4 +1,4 @@
-"""Writes colab_train.ipynb. Edit the cells here and rerun: python notebooks/make_train_notebook.py"""
+"""Writes alfred_colab_train_eval_hf_upload.ipynb. Edit the cells here and rerun: python notebooks/make_train_notebook.py"""
 import json
 from pathlib import Path
 
@@ -553,7 +553,7 @@ def main():
                        "kernelspec": {"display_name": "Python 3", "name": "python3"},
                        "language_info": {"name": "python"}},
           "nbformat": 4, "nbformat_minor": 0}
-    out = Path(__file__).with_name("colab_train.ipynb")
+    out = Path(__file__).with_name("alfred_colab_train_eval_hf_upload.ipynb")
     out.write_text(json.dumps(nb, indent=1) + "\n")
     print("wrote", out)
 
