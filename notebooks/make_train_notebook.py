@@ -476,20 +476,23 @@ if not os.path.exists(f'{LLAMA}/build/bin/llama-server'):
         print(open('/content/llama-build.log').read()[-5000:])
         raise
 sh(f'{sys.executable} -m pip install -q --no-deps {LLAMA}/gguf-py')
-# Newer transformers describe this model's layers as a list ('mamba'/'linear_attention', 'mlp', 'attention') instead
-# of the 'M-M*' pattern, and llama.cpp's converter only counts 'moe' as a feed-forward layer in that list, so it writes
-# every MLP layer as a Mamba layer and the server refuses the file. Count 'mlp' too.
-NEMOTRON_PY = f'{LLAMA}/conversion/nemotron.py'
-if os.path.exists(NEMOTRON_PY):
-    code = open(NEMOTRON_PY).read()
-    open(NEMOTRON_PY, 'w').write(code.replace('_MLP_LAYER_TYPES = {"moe"}', '_MLP_LAYER_TYPES = {"moe", "mlp"}'))
+# llama.cpp's converter reads the config through transformers, and transformers 5 rewrites this model's: the 'M-M*'
+# layer pattern becomes a list the converter misreads, and an added num_experts_per_tok makes it write the dense 4B as
+# a mixture-of-experts model, which the server then refuses. Make it read config.json as written (its own fallback).
+BASE_PY = f'{LLAMA}/conversion/base.py'
+AUTOCONFIG = 'config = AutoConfig.from_pretrained(dir_model, trust_remote_code=False).to_dict()'
+code = open(BASE_PY).read()
+if AUTOCONFIG in code:
+    open(BASE_PY, 'w').write(code.replace(AUTOCONFIG, 'raise ValueError("reading config.json as written")'))
+else:
+    assert 'reading config.json as written' in code, f'llama.cpp changed: {AUTOCONFIG!r} is gone from {BASE_PY}'
 GGUF = f'{TRAIN}/gguf'
 os.makedirs(GGUF, exist_ok=True)
 BF16, Q4 = f'{GGUF}/alfred-4b-BF16.gguf', f'{GGUF}/alfred-4b-Q4_K_M.gguf'
 # The GGUF files must come from the same llama.cpp as the server that loads them (the format of hybrid Mamba models
 # changes between versions), so they're remade whenever a runtime reset rebuilds llama.cpp from a newer commit.
 LLAMA_COMMIT = subprocess.run(['git', '-C', LLAMA, 'rev-parse', 'HEAD'], capture_output=True,
-                              text=True).stdout.strip() + ' +mlp-layers'
+                              text=True).stdout.strip() + ' +config-json'
 STAMP = f'{GGUF}/llama_cpp_commit.txt'
 if not os.path.exists(STAMP) or open(STAMP).read().strip() != LLAMA_COMMIT:
     for f in (BF16, Q4):
@@ -499,8 +502,24 @@ if not os.path.exists(BF16):
     sh(f'{sys.executable} {LLAMA}/convert_hf_to_gguf.py {shlex.quote(FINAL)} --outtype bf16 --outfile {shlex.quote(BF16)}')
 if not os.path.exists(Q4):
     sh(f'{LLAMA}/build/bin/llama-quantize {shlex.quote(BF16)} {shlex.quote(Q4)} Q4_K_M')
+# The file must describe a plain (not mixture-of-experts) Nemotron-H with the base model's layer pattern.
+layout = subprocess.run([sys.executable, '-c', '''
+import json, sys
+from gguf import GGUFReader
+fields = GGUFReader(sys.argv[1]).fields
+arch = bytes(fields["general.architecture"].parts[-1]).decode()
+ff = fields.get(arch + ".feed_forward_length")
+print(json.dumps([arch, [int(ff.parts[i][0]) for i in ff.data] if ff else None]))
+''', Q4], capture_output=True, text=True)
+arch, n_ff = json.loads(layout.stdout or 'null') or (layout.stderr, None)
+pattern = json.load(open(f'{FINAL}/config.json'))['hybrid_override_pattern']
+want = [1 if c == '-' else 0 for c in pattern]
+if arch != 'nemotron_h' or [int(x > 0) for x in n_ff or []] != want:
+    os.remove(Q4)
+    raise RuntimeError(f'The 4-bit file has the wrong layout ({arch}, feed-forward layers {n_ff}); expected '
+                       f'nemotron_h with feed-forward layers where {pattern} has "-".')
 open(STAMP, 'w').write(LLAMA_COMMIT)
-print(f'4-bit model: {os.path.getsize(Q4) / 1e9:.2f} GB')
+print(f'4-bit model: {os.path.getsize(Q4) / 1e9:.2f} GB, layout checked')
 
 # Play the Alfred tasks with the 4-bit model under llama.cpp, the way a laptop would run it.
 # Served from local disk: loading from Drive can take longer than the wait below.
