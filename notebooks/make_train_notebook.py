@@ -577,7 +577,7 @@ if hf_token:
         open(os.path.join(folder, 'README.md'), 'w').write(card)
     shutil.copy(hf_hub_download(MODEL, 'nano_v3_reasoning_parser.py'), FINAL)  # the card's vLLM command uses it
     shutil.copytree(f'{EXPORT_FROM}/best', f'{FINAL}/lora', dirs_exist_ok=True)
-    gguf_files = ['*Q4_K_M.gguf', 'README.md', 'LICENSE', 'LICENSE-NVIDIA']
+    gguf_files = [os.path.basename(Q4), 'README.md', 'LICENSE', 'LICENSE-NVIDIA']  # not older exports in the folder
     for repo, folder, pattern in [(MODEL_REPO, FINAL, None), (GGUF_REPO, GGUF, gguf_files)]:
         api.create_repo(repo, exist_ok=True)
         api.update_repo_settings(repo_id=repo, gated='auto')  # before any weights go up
