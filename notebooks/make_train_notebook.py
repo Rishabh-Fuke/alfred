@@ -481,15 +481,26 @@ if not os.path.exists(Q4):
 print(f'4-bit model: {os.path.getsize(Q4) / 1e9:.2f} GB')
 
 # Play the Alfred tasks with the 4-bit model under llama.cpp, the way a laptop would run it.
-llama = subprocess.Popen([f'{LLAMA}/build/bin/llama-server', '-m', Q4, '--jinja', '-c', '131072', '-ngl', '99',
+# Served from local disk: loading from Drive can take longer than the wait below.
+LOCAL_Q4 = '/content/alfred-4b-Q4_K_M.gguf'
+if not os.path.exists(LOCAL_Q4) or os.path.getsize(LOCAL_Q4) != os.path.getsize(Q4):
+    shutil.copy(Q4, LOCAL_Q4)
+llama = subprocess.Popen([f'{LLAMA}/build/bin/llama-server', '-m', LOCAL_Q4, '--jinja', '-c', '131072', '-ngl', '99',
                           '--port', '8090', '--parallel', '8', '--alias', 'alfred-q4'],
                          stdout=open('/content/llama-server.log', 'w'), stderr=subprocess.STDOUT)
-for _ in range(120):
+for _ in range(300):  # up to 10 minutes
+    if llama.poll() is not None:
+        break
     try:
         urllib.request.urlopen('http://localhost:8090/v1/models', timeout=3)
         break
     except Exception:
         time.sleep(2)
+else:
+    llama.terminate()
+if llama.poll() is not None:
+    print(open('/content/llama-server.log').read()[-5000:])
+    raise RuntimeError('llama-server did not start; its log is above.')
 try:
     Q4_RUN = ['--base-url', 'http://localhost:8090/v1', '--tool-mode', 'native', '--no-think', '--temperature', 0.6,
               '--extra-body', '{"top_p": 0.95}', '--workers', 8]
