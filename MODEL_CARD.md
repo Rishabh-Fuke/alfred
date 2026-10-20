@@ -5,11 +5,8 @@ license_link: LICENSE
 base_model: nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16
 extra_gated_heading: Access Alfred 4B for non-commercial evaluation
 extra_gated_prompt: >-
-  Alfred 4B is shared as evidence for the results in https://github.com/Rishabh-Fuke/alfred. Under the Alfred 4B
-  Evaluation License (LICENSE in this repository) you may download and run it privately to evaluate it and reproduce
-  its results, non-commercially, and publish your evaluation results with credit. You may not use it commercially,
-  modify it or make derivatives (fine-tuning, merging, distilling, training on its outputs), or share, publish or
-  host it or any derivative. It is also governed by the NVIDIA Nemotron Open Model License (LICENSE-NVIDIA).
+  Free for non-commercial evaluation under the Alfred 4B Evaluation License (LICENSE) and NVIDIA's license
+  (LICENSE-NVIDIA).
 extra_gated_fields:
   I will use Alfred 4B only for non-commercial evaluation: checkbox
   I will not redistribute it or make or share derivatives of it: checkbox
