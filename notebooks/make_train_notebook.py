@@ -474,16 +474,25 @@ sh(f'{sys.executable} -m pip install -q --no-deps {LLAMA}/gguf-py')
 GGUF = f'{TRAIN}/gguf'
 os.makedirs(GGUF, exist_ok=True)
 BF16, Q4 = f'{GGUF}/alfred-4b-BF16.gguf', f'{GGUF}/alfred-4b-Q4_K_M.gguf'
+# The GGUF files must come from the same llama.cpp as the server that loads them (the format of hybrid Mamba models
+# changes between versions), so they're remade whenever a runtime reset rebuilds llama.cpp from a newer commit.
+LLAMA_COMMIT = subprocess.run(['git', '-C', LLAMA, 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+STAMP = f'{GGUF}/llama_cpp_commit.txt'
+if not os.path.exists(STAMP) or open(STAMP).read().strip() != LLAMA_COMMIT:
+    for f in (BF16, Q4):
+        if os.path.exists(f):
+            os.remove(f)
 if not os.path.exists(BF16):
     sh(f'{sys.executable} {LLAMA}/convert_hf_to_gguf.py {shlex.quote(FINAL)} --outtype bf16 --outfile {shlex.quote(BF16)}')
 if not os.path.exists(Q4):
     sh(f'{LLAMA}/build/bin/llama-quantize {shlex.quote(BF16)} {shlex.quote(Q4)} Q4_K_M')
+open(STAMP, 'w').write(LLAMA_COMMIT)
 print(f'4-bit model: {os.path.getsize(Q4) / 1e9:.2f} GB')
 
 # Play the Alfred tasks with the 4-bit model under llama.cpp, the way a laptop would run it.
 # Served from local disk: loading from Drive can take longer than the wait below.
 LOCAL_Q4 = '/content/alfred-4b-Q4_K_M.gguf'
-if not os.path.exists(LOCAL_Q4) or os.path.getsize(LOCAL_Q4) != os.path.getsize(Q4):
+if not os.path.exists(LOCAL_Q4) or os.path.getmtime(LOCAL_Q4) < os.path.getmtime(Q4):
     shutil.copy(Q4, LOCAL_Q4)
 llama = subprocess.Popen([f'{LLAMA}/build/bin/llama-server', '-m', LOCAL_Q4, '--jinja', '-c', '131072', '-ngl', '99',
                           '--port', '8090', '--parallel', '8', '--alias', 'alfred-q4'],
