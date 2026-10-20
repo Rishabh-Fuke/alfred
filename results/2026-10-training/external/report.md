@@ -24,6 +24,17 @@ Benchmarks Alfred never trains on. Rates have 95% bootstrap intervals over items
 | Said it can't when it can't | 55% [45%-65%] | tool_call 21, request_for_info 18, direct_answer 6 |
 | Called a tool when none was offered (lower is better) | 0% [0%-0%] | |
 
+## When2Call: alfred-rl4 no-think
+
+300 items, macro F1 0.70, accuracy 70% [65%-75%].
+
+| Behavior | Rate | What it did instead |
+|---|---|---|
+| Called a tool when it should | 96% [92%-99%] | request_for_info 3, direct_answer 1 |
+| Asked for missing information | 65% [55%-74%] | tool_call 34, cannot_answer 1 |
+| Said it can't when it can't | 50% [40%-60%] | request_for_info 28, tool_call 17, direct_answer 5 |
+| Called a tool when none was offered (lower is better) | 0% [0%-0%] | |
+
 ## When2Call: alfred-rl no-think
 
 300 items, macro F1 0.25, accuracy 37% [32%-43%].
@@ -66,6 +77,17 @@ Benchmarks Alfred never trains on. Rates have 95% bootstrap intervals over items
 | Called a tool when it should | 97% [93%-100%] | request_for_info 2, direct_answer 1 |
 | Asked for missing information | 58% [48%-68%] | tool_call 42 |
 | Said it can't when it can't | 54% [45%-64%] | tool_call 22, request_for_info 20, direct_answer 4 |
+| Called a tool when none was offered (lower is better) | 0% [0%-0%] | |
+
+## When2Call: alfred-sft4 no-think
+
+300 items, macro F1 0.69, accuracy 69% [64%-74%].
+
+| Behavior | Rate | What it did instead |
+|---|---|---|
+| Called a tool when it should | 96% [91%-99%] | request_for_info 3, direct_answer 1 |
+| Asked for missing information | 65% [55%-74%] | tool_call 35 |
+| Said it can't when it can't | 47% [37%-57%] | request_for_info 28, tool_call 20, direct_answer 5 |
 | Called a tool when none was offered (lower is better) | 0% [0%-0%] | |
 
 ## When2Call: alfred-sft no-think
@@ -150,6 +172,14 @@ Benchmarks Alfred never trains on. Rates have 95% bootstrap intervals over items
 | Missing detail: asked instead of guessing | 22% (44/200) |
 | Missing tool: said so instead of forcing a call | 14% (27/200) |
 
+## BFCL multi-turn: alfred-rl4 no-think
+
+| Category | Accuracy |
+|---|---|
+| Multi-turn tasks with everything available (control) | 39% (78/200) |
+| Missing detail: asked instead of guessing | 28% (57/200) |
+| Missing tool: said so instead of forcing a call | 18% (37/200) |
+
 ## BFCL multi-turn: alfred-rl no-think
 
 | Category | Accuracy |
@@ -191,6 +221,15 @@ Note: 9 episodes ran past the context window and count as failures.
 | Did the user's task while under attack | 45% [41%-49%] |
 | Carried out the attacker's goal (`important_instructions_no_names`; lower is better) | 3% [1%-4%] |
 Note: 2 episodes ran past the context window and count as failures.
+
+## AgentDojo workspace: alfred-rl4 no-think
+
+| Metric | Rate |
+|---|---|
+| Did the user's task (no attack) | 55% [40%-70%] |
+| Did the user's task while under attack | 41% [38%-46%] |
+| Carried out the attacker's goal (`important_instructions_no_names`; lower is better) | 4% [3%-6%] |
+Note: 4 episodes ran past the context window and count as failures.
 
 ## AgentDojo workspace: nemotron-3-nano-4b no-think
 

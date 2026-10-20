@@ -49,10 +49,16 @@ def secret(name):
         return None
 
 
-# Always start from the latest code: from GitHub with the GITHUB_TOKEN secret, else the newest alfred*.zip on Drive.
+# Always start from the latest code: from GitHub (public, or private with the GITHUB_TOKEN secret), else the newest
+# alfred*.zip on Drive.
 subprocess.run(['rm', '-rf', '/content/alfred', '/content/unzipped'], check=True)
 token = secret('GITHUB_TOKEN')
-if token:
+public = not token and subprocess.run(['git', 'clone', '-q', '--depth', '1', 'https://github.com/Rishabh-Fuke/alfred.git',
+                                       '/content/alfred'], capture_output=True).returncode == 0
+if public:
+    print(subprocess.run(['git', '-C', '/content/alfred', 'log', '--oneline', '-1'], capture_output=True,
+                         text=True).stdout)
+elif token:
     r = subprocess.run(['git', 'clone', '-q', '--depth', '1',
                         f'https://x-access-token:{token}@github.com/Rishabh-Fuke/alfred.git', '/content/alfred'],
                        capture_output=True, text=True)
@@ -426,7 +432,7 @@ external('summary', EXT, '--out', f'{EXT}/report.md')
 print(open(f'{EXT}/report.md').read())
 """
 
-PACKAGE = r"""# 12. Package everything to send back (about 1 minute)
+PACKAGE = r"""# 12. Package everything to send back (15-30 minutes: Google Drive is slow at reading thousands of small files)
 # Logs, reports, data stats, validation curves and episodes, and every eval run's trajectories. Adapters and
 # the training data itself stay on Drive.
 os.chdir(OUT)
@@ -453,7 +459,7 @@ EXPORT = r"""# 13. Export for laptops (about 40 minutes): merge, convert to GGUF
 # The merged model goes to Drive; the 4-bit GGUF is what Ollama and llama.cpp run on a laptop. The check plays the
 # trained task types with the 4-bit model under llama.cpp, in both interfaces, so "it still works after
 # quantization" is measured.
-FINAL = f'{TRAIN}/alfred-nemotron-3-nano-4b'
+FINAL = f'{TRAIN}/alfred-4b'
 stop_serving()
 # The adapter to ship: round 4's by default. If round 4 didn't beat round 3 on the same evals, use V3_GRPO_DIR.
 EXPORT_FROM = GRPO_DIR
@@ -467,7 +473,7 @@ if not os.path.exists(f'{LLAMA}/build/bin/llama-server'):
 sh(f'{sys.executable} -m pip install -q --no-deps {LLAMA}/gguf-py')
 GGUF = f'{TRAIN}/gguf'
 os.makedirs(GGUF, exist_ok=True)
-BF16, Q4 = f'{GGUF}/alfred-nemotron-3-nano-4b-BF16.gguf', f'{GGUF}/alfred-nemotron-3-nano-4b-Q4_K_M.gguf'
+BF16, Q4 = f'{GGUF}/alfred-4b-BF16.gguf', f'{GGUF}/alfred-4b-Q4_K_M.gguf'
 if not os.path.exists(BF16):
     sh(f'{sys.executable} {LLAMA}/convert_hf_to_gguf.py {shlex.quote(FINAL)} --outtype bf16 --outfile {shlex.quote(BF16)}')
 if not os.path.exists(Q4):
@@ -496,14 +502,31 @@ finally:
 for suffix, _, _ in [*ALFRED_SUITE[::2], APP_SUITE[1]]:
     alfred('report', *runs(f'r4-rl4-{suffix}', f'r4-rl4-q4-{suffix}'), '--out', f'{TRAIN}/report-q4-{suffix}.md')
 
-# Publish to Hugging Face (optional): the merged model and the GGUF, so anyone can run it.
+# Publish to Hugging Face (needs an HF_TOKEN secret with write access): the merged model with the exact LoRA adapter
+# that was evaluated (lora/), and the 4-bit GGUF, each with the model card from the repo. The weights are derived
+# from Nemotron, so NVIDIA's license has to go to everyone who gets them: its LICENSE file is copied word for word
+# from the base model's repository. The repo names leave out NVIDIA's product names, which the license doesn't grant;
+# the card says where the model came from.
 hf_token = secret('HF_TOKEN')
 if hf_token:
-    from huggingface_hub import HfApi
+    import re
+    from huggingface_hub import HfApi, hf_hub_download
     api = HfApi(token=hf_token)
     user = api.whoami()['name']
-    for repo, folder, pattern in [(f'{user}/alfred-nemotron-3-nano-4b', FINAL, None),
-                                  (f'{user}/alfred-nemotron-3-nano-4b-GGUF', GGUF, '*Q4_K_M.gguf')]:
+    MODEL_REPO, GGUF_REPO = f'{user}/alfred-4b', f'{user}/alfred-4b-GGUF'
+    base_files = api.list_repo_files(MODEL)
+    licenses = [f for f in base_files if re.match(r'(?i)(license|notice)', os.path.basename(f))]
+    assert licenses, f'No LICENSE file found in {MODEL}; add NVIDIA\'s license text by hand before uploading.'
+    card = (open('/content/alfred/MODEL_CARD.md').read().replace('__MODEL_REPO__', MODEL_REPO)
+            .replace('__GGUF_REPO__', f'https://huggingface.co/{GGUF_REPO}'))
+    for folder in (FINAL, GGUF):
+        for f in licenses:
+            shutil.copy(hf_hub_download(MODEL, f), os.path.join(folder, os.path.basename(f)))
+        open(os.path.join(folder, 'README.md'), 'w').write(card)
+    shutil.copy(hf_hub_download(MODEL, 'nano_v3_reasoning_parser.py'), FINAL)  # the card's vLLM command uses it
+    shutil.copytree(f'{EXPORT_FROM}/best', f'{FINAL}/lora', dirs_exist_ok=True)
+    gguf_files = ['*Q4_K_M.gguf', 'README.md'] + [os.path.basename(f) for f in licenses]
+    for repo, folder, pattern in [(MODEL_REPO, FINAL, None), (GGUF_REPO, GGUF, gguf_files)]:
         api.create_repo(repo, exist_ok=True)
         api.upload_folder(repo_id=repo, folder_path=folder, allow_patterns=pattern)
         print('Uploaded', f'https://huggingface.co/{repo}')

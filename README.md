@@ -15,17 +15,19 @@ Everything is deterministic: the same seed gives the same world, and the same ac
 
 ## Results
 
-Three rounds of training NVIDIA's Nemotron 3 Nano 4B here, with teacher distillation (Nemotron 3 Nano 30B) and RL with verifiable rewards (GRPO), October 2026. Round 3's judgment carried over to apps and benchmarks it never trained on:
+Four rounds of training NVIDIA's Nemotron 3 Nano 4B here, with teacher distillation (Nemotron 3 Nano 30B) and RL with verifiable rewards (GRPO), October 2026. Round 4's judgment carried over to apps and benchmarks it never trained on:
 
-| Measure | Untrained 4B | Round 3 |
+| Measure | Untrained 4B | Round 4 |
 |---|---|---|
-| Apps never trained on, clean success (plain replies / tools) | 72% / 68% | **97% / 93%** |
+| Apps never trained on, clean success (tools / plain replies) | 68% / 75% | **99% / 100%** |
 | When2Call macro F1 (Nemotron 3 Nano 30B: 0.66, Nemotron 3 Super 120B: 0.60) | 0.61 | **0.70** |
-| When2Call: said "I can't" when no tool fits | 32% | **55%** |
-| AgentDojo: attacker's goal carried out (lower is better) | 4% | 3% |
-| Held-out email task types, clean success (plain replies / tools) | 19% / 22% | 70% / 68% |
+| When2Call: asked for missing information (Super: 57%) | 59% | **65%** |
+| When2Call: said "I can't" when no tool fits (Super: 30%) | 32% | **50%** |
+| BFCL multi-turn: asked for a missing detail | 23% | **28%** |
+| Made-up tool arguments on new tasks in the training apps | 23% | **4%** |
+| Held-out email task types, clean success (plain replies / tools) | 19% / 22% | 66% / 67% |
 
-Not everything improved: asking for missing information only recovered to the untrained level (When2Call 57% vs 59%), and BFCL's "a tool is missing" is below it (14% vs 20%). **[RESULTS.md](RESULTS.md)** has the setup, reward design, evaluation method, every baseline, round-by-round results with confidence intervals, and the limitations; the evidence is in [`results/2026-10-training/`](results/2026-10-training/).
+Not everything improved: BFCL's "a tool is missing" is still below the untrained model (18% vs 20%), and on one held-out email test round 4 answers only half of a two-part question. **[RESULTS.md](RESULTS.md)** has the setup, reward design, evaluation method, every baseline, round-by-round results with confidence intervals, and the limitations. These are our own runs; `python scripts/verify_results.py` recomputes the headline numbers from the evidence in [`results/2026-10-training/`](results/2026-10-training/), and the full episodes are in the [release](https://github.com/Rishabh-Fuke/alfred/releases/tag/results-2026-10-training).
 
 ---
 
@@ -233,7 +235,7 @@ An answer that lists more than four times of day or three weekdays doesn't count
 
 **Realistic worlds** (`--style realistic`, `alfred/realism/`). The same facts and tasks, with text from a reviewed content pack: 1,728 templates that Nemotron 3 Super wrote using real Enron emails as style references only (no Enron text is in this repo), plus 60 to 150 background emails, extra people and recurring holds per inbox.
 
-**Procedural app tasks** (`--templates apps`, `alfred/apps/`). The same judgments outside email and calendar: 12 hand-written apps (pharmacy, files, notes, shared expenses, orders, car care, library, pet care, utilities, fitness, school portal, groceries) whose tool names, parameter names and descriptions are drawn per task in one of five naming styles. Five situations: everything was said (call the tool, adding nothing), a required detail is missing (ask), a record is named indirectly (look its id up instead of asking), only a related tool is offered (say it can't), nothing fits (say it can't). Every argument is checked: a value from nothing the agent was told, like a city nobody named or an id like "default", fails the task. Four more apps (`--templates newapps`) are never trained on, not even as distractors.
+**Procedural app tasks** (`--templates apps`, `alfred/apps/`). The same judgments outside email and calendar: 12 hand-written apps (pharmacy, files, notes, shared expenses, orders, car care, library, pet care, utilities, fitness, school portal, groceries) whose tool names, parameter names and descriptions are drawn per task in one of five naming styles. Five situations: everything was said (call the tool, adding nothing), a required detail is missing (ask), a record is named indirectly (look its id up instead of asking), only a related tool is offered (say it can't), nothing fits (say it can't). Every argument is checked: a value from nothing the agent was told, like a city nobody named or an id like "default", fails the task. Four more apps (`--templates newapps`) are never trained on, not even as distractors. Round 4 added three more situations (`--templates apps4`, held-out `newapps4`): a required field the user didn't mention (ask instead of filling in a default), two records that match (ask which one), and multi-turn conversations over the same tools, always in plain text.
 
 ## Reading results
 
@@ -320,10 +322,11 @@ alfred/
   train/          data (teacher filtering), render (chat-template masking), sft, grpo, rollout, serve (vLLM),
                   export (merge an adapter into the base checkpoint)
   app/            the local web app: a person approves drafts and answers questions (live.py, server.py, static/)
-tests/            about 220 tests, including SFT and GRPO end to end on a tiny CPU model against a fake vLLM server
+tests/            about 230 tests, including SFT and GRPO end to end on a tiny CPU model against a fake vLLM server
 notebooks/        Colab notebooks: the Nemotron baseline, and training (make_train_notebook.py writes it)
 results/          the September and October baselines, and the three training rounds (2026-10-training)
 RESULTS.md        the training write-up
+scripts/verify_results.py  recomputes the headline numbers from results/
 scripts/baseline_laptop.sh
 ```
 
@@ -332,3 +335,7 @@ scripts/baseline_laptop.sh
 - **Rule-based grading.** A correct email that phrases the day unusually ("the 9th") could be rejected. Check rejected drafts in the trajectories before reading too much into a low score.
 - **Scope.** One user, English only. The simulated user answers clarifying questions with fixed replies and doesn't negotiate. App tasks are single requests, not multi-turn conversations.
 - **What training hasn't fixed yet** (details in RESULTS.md): asking for missing information is only back to the untrained level; the trained model doesn't recover well after a rejected draft; weekday-to-date arithmetic is unreliable; the ambiguous-meeting held-out test is 0% for every model.
+
+## License
+
+The code is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE) for third-party attributions. Models trained with it are derived from NVIDIA Nemotron and are governed by the [NVIDIA Nemotron Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/).

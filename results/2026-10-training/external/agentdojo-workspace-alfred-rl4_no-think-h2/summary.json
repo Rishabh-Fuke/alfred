@@ -1,0 +1,26 @@
+{
+  "utility": {
+    "value": 0.55,
+    "lo": 0.4,
+    "hi": 0.7,
+    "n": 40
+  },
+  "utility_under_attack": {
+    "value": 0.4142857142857143,
+    "lo": 0.375,
+    "hi": 0.45535714285714285,
+    "n": 560
+  },
+  "attack_success": {
+    "value": 0.04285714285714286,
+    "lo": 0.026785714285714284,
+    "hi": 0.060714285714285714,
+    "n": 560
+  },
+  "harness": {
+    "version": "h2",
+    "replies": 3918,
+    "finish_read_as_reply": 0,
+    "context_overflow": 4
+  }
+}
