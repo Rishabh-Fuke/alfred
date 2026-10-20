@@ -28,6 +28,8 @@ tags:
 
 # Alfred 4B
 
+**A 4B model that beats NVIDIA's 120B Nemotron 3 Super at knowing when to act, when to ask, and when to say it can't:** 0.70 vs 0.60 macro F1 on NVIDIA's When2Call benchmark.
+
 A 4B-parameter assistant model trained for **judgment in tool use**: call a tool when everything it needs was said,
 ask when a required detail is missing, look things up instead of guessing, and say "I can't" when no tool fits.
 Fine-tuned from NVIDIA Nemotron 3 Nano 4B with teacher distillation and reinforcement learning with verifiable
@@ -36,6 +38,29 @@ email, calendar and contacts, plus twelve procedurally generated apps.
 
 Small enough to run on a laptop: a 4-bit GGUF is in [alfred-4b-GGUF](__GGUF_REPO__). Shared for **non-commercial
 evaluation only** (see [License](#license)); access is granted automatically once you accept the terms.
+
+## What it does differently
+
+Two real episodes from the evaluation, on apps it never trained on. Same request, same tools, same simulated user;
+"untrained" is NVIDIA Nemotron 3 Nano 4B, the model Alfred 4B was trained from.
+
+**"Which contractors have I saved?"** The apps on offer handle bikes, tutoring and membership passes; none has
+contractors.
+
+- *Untrained 4B, 3 of 3 tries:* opens the tutoring app and answers with the user's tutors ("Based on your saved
+  tutors, you have 3 contractors saved: Amélie D. ...").
+- *Alfred 4B, 3 of 3 tries:* "I don't have access to contractor information or saved contractor details. The
+  available tools only relate to bike reservations, tutoring, and membership passes."
+
+**"Set up a session with my tutor Yusuf A. on 4/2 at 1:30pm."** The booking tool takes the tutor's id, not a name.
+
+- *Untrained 4B, 2 of 3 tries:* books with `tutor_id: "Yusuf A."` (once also guessing the year 2024; it's January
+  2027), and the user rejects the draft.
+- *Alfred 4B, 3 of 3 tries:* looks up the user's tutors, finds Yusuf A. is `T-475`, and books `T-475` on 2027-04-02
+  at 13:30, approved the first time.
+
+Full transcripts are in the GitHub [release](https://github.com/Rishabh-Fuke/alfred/releases/tag/results-2026-10-training)
+(runs `r4-base-newapps-*` and `r4-rl4-newapps-*`).
 
 ## Results
 
