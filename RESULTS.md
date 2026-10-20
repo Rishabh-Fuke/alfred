@@ -307,6 +307,15 @@ Because of this, held-out email results are flat overall (66% and 67%, against 7
 - **The laptop build isn't verified yet.** These results are for the BF16 adapter served by vLLM. The 4-bit GGUF
   export and its check are next.
 
+## Model
+
+Round 4's model is on Hugging Face, gated for non-commercial evaluation under the [Alfred 4B Evaluation License](MODEL_LICENSE.md) (accepting the terms grants access automatically):
+
+- [rish-huggingface/alfred-4b](https://huggingface.co/rish-huggingface/alfred-4b): the merged BF16 weights, and the
+  LoRA adapter that was evaluated (`lora/`).
+- [rish-huggingface/alfred-4b-GGUF](https://huggingface.co/rish-huggingface/alfred-4b-GGUF): a 4-bit (Q4_K_M) GGUF
+  for llama.cpp and Ollama, 2.85 GB.
+
 ## Reproduce
 
 `notebooks/alfred_colab_train_eval_hf_upload.ipynb` runs everything on one Colab A100, resuming after disconnects. It covers the teacher
