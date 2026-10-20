@@ -1,8 +1,19 @@
 ---
 license: other
-license_name: nvidia-nemotron-open-model-license
-license_link: https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/
+license_name: alfred-4b-evaluation-license
+license_link: LICENSE
 base_model: nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16
+extra_gated_heading: Access Alfred 4B for non-commercial evaluation
+extra_gated_prompt: >-
+  Alfred 4B is shared as evidence for the results in https://github.com/Rishabh-Fuke/alfred. Under the Alfred 4B
+  Evaluation License (LICENSE in this repository) you may download and run it privately to evaluate it and reproduce
+  its results, non-commercially, and publish your evaluation results with credit. You may not use it commercially,
+  modify it or make derivatives (fine-tuning, merging, distilling, training on its outputs), or share, publish or
+  host it or any derivative. It is also governed by the NVIDIA Nemotron Open Model License (LICENSE-NVIDIA).
+extra_gated_fields:
+  I will use Alfred 4B only for non-commercial evaluation: checkbox
+  I will not redistribute it or make or share derivatives of it: checkbox
+extra_gated_button_content: Agree and access
 language:
 - en
 pipeline_tag: text-generation
@@ -23,7 +34,8 @@ Fine-tuned from NVIDIA Nemotron 3 Nano 4B with teacher distillation and reinforc
 rewards (GRPO) in [Alfred](https://github.com/Rishabh-Fuke/alfred), a sandboxed environment that simulates a person's
 email, calendar and contacts, plus twelve procedurally generated apps.
 
-Small enough to run on a laptop: a 4-bit GGUF is in [alfred-4b-GGUF](__GGUF_REPO__).
+Small enough to run on a laptop: a 4-bit GGUF is in [alfred-4b-GGUF](__GGUF_REPO__). Shared for **non-commercial
+evaluation only** (see [License](#license)); access is granted automatically once you accept the terms.
 
 ## Results
 
@@ -93,7 +105,11 @@ With llama.cpp: `llama-server -m alfred-4b-Q4_K_M.gguf --jinja`, and the same `c
 
 ## License
 
-The weights are derived from NVIDIA Nemotron 3 Nano 4B and are governed by the
-[NVIDIA Nemotron Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/);
-a copy of NVIDIA's license files is included in this repository. NVIDIA and Nemotron are trademarks of NVIDIA
-Corporation. The training code is Apache-2.0 at [github.com/Rishabh-Fuke/alfred](https://github.com/Rishabh-Fuke/alfred).
+**Evaluation only.** The weights are licensed under the Alfred 4B Evaluation License (`LICENSE` in this repository):
+you may download and run them privately to evaluate the model and reproduce its results, non-commercially, and
+publish your evaluation results with credit. You may not use them commercially, make derivatives (fine-tuning,
+merging, distilling, training on outputs), or redistribute, publish or host them or any derivative. As a derivative of
+NVIDIA Nemotron 3 Nano 4B they are also governed by the
+[NVIDIA Nemotron Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/)
+(`LICENSE-NVIDIA`). NVIDIA and Nemotron are trademarks of NVIDIA Corporation. The training and evaluation code is
+separate, under AGPL-3.0, at [github.com/Rishabh-Fuke/alfred](https://github.com/Rishabh-Fuke/alfred).

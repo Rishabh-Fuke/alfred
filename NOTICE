@@ -1,17 +1,18 @@
 Alfred
 Copyright 2026 Rishabh Fuke
 
-The code in this repository is licensed under the Apache License, Version 2.0 (see LICENSE).
+The code in this repository is licensed under the GNU Affero General Public License v3.0 (see LICENSE).
+
+The trained Alfred 4B model weights are not covered by that license. They are licensed separately under the Alfred
+4B Evaluation License (MODEL_LICENSE.md), which allows non-commercial evaluation only, and are also governed by the
+NVIDIA Nemotron Open Model License
+(https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/), because they are
+derived from NVIDIA Nemotron 3 Nano 4B. NVIDIA and Nemotron are trademarks of NVIDIA Corporation; they are used here
+only to describe where a model came from.
 
 This product includes the LLM-as-judge prompt from NVIDIA's When2Call benchmark
 (https://github.com/NVIDIA/When2Call), licensed under the Apache License, Version 2.0, in
 alfred/external/when2call.py.
-
-Models trained with this code are derived from NVIDIA Nemotron models. Their weights are governed by the
-NVIDIA Nemotron Open Model License
-(https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/), not by the
-Apache License. NVIDIA and Nemotron are trademarks of NVIDIA Corporation; they are used here only to describe
-where a model came from.
 
 The realistic-world content pack (alfred/realism/packs) was written by NVIDIA Nemotron 3 Super. Emails from the
 Enron corpus were used only as style references during generation; no Enron text is included in this repository.

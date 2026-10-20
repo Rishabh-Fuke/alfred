@@ -338,4 +338,6 @@ scripts/baseline_laptop.sh
 
 ## License
 
-The code is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE) for third-party attributions. Models trained with it are derived from NVIDIA Nemotron and are governed by the [NVIDIA Nemotron Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/).
+The code is licensed under the [GNU Affero General Public License v3.0](LICENSE); see [NOTICE](NOTICE) for third-party attributions.
+
+The trained Alfred 4B model is **not** under that license. Its weights are evaluation-only under the [Alfred 4B Evaluation License](MODEL_LICENSE.md): you may download and run it to test it and reproduce the results, non-commercially, but not use it commercially, build derivatives of it, or redistribute it. As a derivative of NVIDIA Nemotron 3 Nano 4B it is also governed by the [NVIDIA Nemotron Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-nemotron-open-model-license/).

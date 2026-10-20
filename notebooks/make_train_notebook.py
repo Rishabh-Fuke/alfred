@@ -502,11 +502,12 @@ finally:
 for suffix, _, _ in [*ALFRED_SUITE[::2], APP_SUITE[1]]:
     alfred('report', *runs(f'r4-rl4-{suffix}', f'r4-rl4-q4-{suffix}'), '--out', f'{TRAIN}/report-q4-{suffix}.md')
 
-# Publish to Hugging Face (needs an HF_TOKEN secret with write access): the merged model with the exact LoRA adapter
-# that was evaluated (lora/), and the 4-bit GGUF, each with the model card from the repo. The weights are derived
-# from Nemotron, so NVIDIA's license has to go to everyone who gets them: its LICENSE file is copied word for word
-# from the base model's repository. The repo names leave out NVIDIA's product names, which the license doesn't grant;
-# the card says where the model came from.
+# Publish to Hugging Face (needs an HF_TOKEN secret with write access), as evidence for the results: the merged model
+# with the exact LoRA adapter that was evaluated (lora/), and the 4-bit GGUF. The weights are evaluation-only: LICENSE
+# is the Alfred 4B Evaluation License from the repo, and each repo is gated (visitors accept those terms, then get
+# access automatically) before any weights are uploaded. They're derived from Nemotron, so NVIDIA's license also goes
+# to everyone who gets them: LICENSE-NVIDIA, copied word for word from the base model's repository. The repo names
+# leave out NVIDIA's product names, which its license doesn't grant; the card says where the model came from.
 hf_token = secret('HF_TOKEN')
 if hf_token:
     import re
@@ -514,22 +515,22 @@ if hf_token:
     api = HfApi(token=hf_token)
     user = api.whoami()['name']
     MODEL_REPO, GGUF_REPO = f'{user}/alfred-4b', f'{user}/alfred-4b-GGUF'
-    base_files = api.list_repo_files(MODEL)
-    licenses = [f for f in base_files if re.match(r'(?i)(license|notice)', os.path.basename(f))]
-    assert licenses, f'No LICENSE file found in {MODEL}; add NVIDIA\'s license text by hand before uploading.'
+    nvidia = [f for f in api.list_repo_files(MODEL) if re.fullmatch(r'(?i)license(\.(md|txt))?', os.path.basename(f))]
+    assert nvidia, f'No LICENSE file found in {MODEL}; add NVIDIA\'s license text by hand before uploading.'
     card = (open('/content/alfred/MODEL_CARD.md').read().replace('__MODEL_REPO__', MODEL_REPO)
             .replace('__GGUF_REPO__', f'https://huggingface.co/{GGUF_REPO}'))
     for folder in (FINAL, GGUF):
-        for f in licenses:
-            shutil.copy(hf_hub_download(MODEL, f), os.path.join(folder, os.path.basename(f)))
+        shutil.copy(hf_hub_download(MODEL, nvidia[0]), os.path.join(folder, 'LICENSE-NVIDIA'))
+        shutil.copy('/content/alfred/MODEL_LICENSE.md', os.path.join(folder, 'LICENSE'))
         open(os.path.join(folder, 'README.md'), 'w').write(card)
     shutil.copy(hf_hub_download(MODEL, 'nano_v3_reasoning_parser.py'), FINAL)  # the card's vLLM command uses it
     shutil.copytree(f'{EXPORT_FROM}/best', f'{FINAL}/lora', dirs_exist_ok=True)
-    gguf_files = ['*Q4_K_M.gguf', 'README.md'] + [os.path.basename(f) for f in licenses]
+    gguf_files = ['*Q4_K_M.gguf', 'README.md', 'LICENSE', 'LICENSE-NVIDIA']
     for repo, folder, pattern in [(MODEL_REPO, FINAL, None), (GGUF_REPO, GGUF, gguf_files)]:
         api.create_repo(repo, exist_ok=True)
+        api.update_repo_settings(repo_id=repo, gated='auto')  # before any weights go up
         api.upload_folder(repo_id=repo, folder_path=folder, allow_patterns=pattern)
-        print('Uploaded', f'https://huggingface.co/{repo}')
+        print('Uploaded', f'https://huggingface.co/{repo}', '(gated: accept the terms, then access is automatic)')
 else:
     print('Add an HF_TOKEN secret to publish the model; the files are on your Drive in', TRAIN)
 """
