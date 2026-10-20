@@ -304,8 +304,6 @@ Because of this, held-out email results are flat overall (66% and 67%, against 7
 - **Runaway replies on two benchmarks.** BFCL and AgentDojo runs set no cap on reply length, so a few replies ran to
   the context limit; those episodes count as failures (AgentDojo: 4 in round 4). Our own evaluations cap replies at
   4,096 tokens.
-- **The laptop build isn't verified yet.** These results are for the BF16 adapter served by vLLM. The 4-bit GGUF
-  export and its check are next.
 
 ## Model
 
@@ -315,6 +313,20 @@ Round 4's model is on Hugging Face, gated for non-commercial evaluation under th
   LoRA adapter that was evaluated (`lora/`).
 - [rish-huggingface/alfred-4b-GGUF](https://huggingface.co/rish-huggingface/alfred-4b-GGUF): a 4-bit (Q4_K_M) GGUF
   for llama.cpp and Ollama, 2.85 GB.
+
+The 4-bit file holds up. Served by llama.cpp the way a laptop would run it, on the same tasks as the full model
+(clean success, 95% intervals over tasks):
+
+| Suite | Round 4, BF16 on vLLM | Round 4, 4-bit on llama.cpp |
+|---|---|---|
+| Trained Alfred tasks, tools (180 episodes) | 99% [98-100] | 100% [100-100] |
+| Trained Alfred tasks, plain replies (180) | 98% [96-100] | 97% [93-99] |
+| Apps never trained on, plain replies (75) | 100% [100-100] | 97% [93-100] |
+
+Every gap is within the intervals. The runs are `r4-rl4-q4-*` and the side-by-side reports are
+`reports/round4/report-q4-*.md`. Converting this model needed two fixes to llama.cpp's converter (commit 839a572),
+both in the notebook: with transformers 5 it wrote the dense 4B as a mixture-of-experts model with the wrong layer
+types, which llama.cpp then refused to load.
 
 ## Reproduce
 

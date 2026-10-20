@@ -81,6 +81,7 @@ reply = client.chat.completions.create(
 ```
 
 With llama.cpp: `llama-server -m alfred-4b-Q4_K_M.gguf --jinja`, and the same `chat_template_kwargs` in each request.
+The 4-bit GGUF scores within the margin of the full model on the same tasks: 100% vs 99% clean success on trained tasks with tools, 97% vs 98% with plain replies, and 97% vs 100% on apps never trained on.
 
 ## Training
 

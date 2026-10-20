@@ -74,6 +74,13 @@ def main() -> int:
     check("Episodes with a made-up tool argument, round 4",
           share(episodes("r4-rl4-apps-text"), lambda m: m["fabricated"] > 0), 0.04, 0.006)
 
+    # 2b. The 4-bit GGUF under llama.cpp, on the same tasks as the full model.
+    for suite, full, q4 in (("tools-real", 0.99, 1.00), ("text-real", 0.98, 0.97), ("newapps-text", 1.00, 0.97)):
+        check(f"4-bit check ({suite}), round 4 BF16 clean success",
+              share(episodes(f"r4-rl4-{suite}"), lambda m: m["clean_success"]), full, 0.006)
+        check(f"4-bit check ({suite}), round 4 4-bit clean success",
+              share(episodes(f"r4-rl4-q4-{suite}"), lambda m: m["clean_success"]), q4, 0.006)
+
     # 3. When2Call against Nemotron 3 Super 120B, on the same 300 items, same judge.
     ours = when2call(EXT / "when2call-llm_judge-alfred-rl4_no-think-h2/responses.jsonl")
     sup = when2call(BASELINE_EXT / "when2call-llm_judge-nvidia_nemotron-3-super-120b-a12b/responses.jsonl")
