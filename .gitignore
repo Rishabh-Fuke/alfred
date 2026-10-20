@@ -1,4 +1,5 @@
-runs/
+# Local eval output. Anchored to the repo root: results/*/runs/ is committed evidence.
+/runs/
 __pycache__/
 *.egg-info/
 .venv/
