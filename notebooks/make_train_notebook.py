@@ -476,12 +476,20 @@ if not os.path.exists(f'{LLAMA}/build/bin/llama-server'):
         print(open('/content/llama-build.log').read()[-5000:])
         raise
 sh(f'{sys.executable} -m pip install -q --no-deps {LLAMA}/gguf-py')
+# Newer transformers describe this model's layers as a list ('mamba'/'linear_attention', 'mlp', 'attention') instead
+# of the 'M-M*' pattern, and llama.cpp's converter only counts 'moe' as a feed-forward layer in that list, so it writes
+# every MLP layer as a Mamba layer and the server refuses the file. Count 'mlp' too.
+NEMOTRON_PY = f'{LLAMA}/conversion/nemotron.py'
+if os.path.exists(NEMOTRON_PY):
+    code = open(NEMOTRON_PY).read()
+    open(NEMOTRON_PY, 'w').write(code.replace('_MLP_LAYER_TYPES = {"moe"}', '_MLP_LAYER_TYPES = {"moe", "mlp"}'))
 GGUF = f'{TRAIN}/gguf'
 os.makedirs(GGUF, exist_ok=True)
 BF16, Q4 = f'{GGUF}/alfred-4b-BF16.gguf', f'{GGUF}/alfred-4b-Q4_K_M.gguf'
 # The GGUF files must come from the same llama.cpp as the server that loads them (the format of hybrid Mamba models
 # changes between versions), so they're remade whenever a runtime reset rebuilds llama.cpp from a newer commit.
-LLAMA_COMMIT = subprocess.run(['git', '-C', LLAMA, 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+LLAMA_COMMIT = subprocess.run(['git', '-C', LLAMA, 'rev-parse', 'HEAD'], capture_output=True,
+                              text=True).stdout.strip() + ' +mlp-layers'
 STAMP = f'{GGUF}/llama_cpp_commit.txt'
 if not os.path.exists(STAMP) or open(STAMP).read().strip() != LLAMA_COMMIT:
     for f in (BF16, Q4):
