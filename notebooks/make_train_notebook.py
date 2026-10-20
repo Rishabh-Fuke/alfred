@@ -560,7 +560,7 @@ for suffix, _, _ in [*ALFRED_SUITE[::2], APP_SUITE[1]]:
 # access automatically) before any weights are uploaded. They're derived from Nemotron, so NVIDIA's license also goes
 # to everyone who gets them: LICENSE-NVIDIA, copied word for word from the base model's repository. The repo names
 # leave out NVIDIA's product names, which its license doesn't grant; the card says where the model came from.
-hf_token = secret('HF_TOKEN')
+hf_token = ''.join((secret('HF_TOKEN') or '').split())  # a pasted token can pick up a line break
 if hf_token:
     import re
     from huggingface_hub import HfApi, hf_hub_download
