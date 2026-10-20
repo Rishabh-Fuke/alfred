@@ -467,9 +467,14 @@ if not os.path.exists(f'{FINAL}/alfred_merge.json'):
     alfred('train.export', '--model', MODEL, '--adapter', f'{EXPORT_FROM}/best', '--out', FINAL)
 LLAMA = '/content/llama.cpp'
 if not os.path.exists(f'{LLAMA}/build/bin/llama-server'):
+    shutil.rmtree(LLAMA, ignore_errors=True)  # what an interrupted clone or build left behind
     sh(f'git clone -q --depth 1 https://github.com/ggml-org/llama.cpp {LLAMA}')
-    sh(f'cmake -S {LLAMA} -B {LLAMA}/build -DGGML_CUDA=ON -DLLAMA_CURL=OFF > /content/llama-build.log 2>&1')
-    sh(f'cmake --build {LLAMA}/build -j 12 --target llama-server llama-quantize >> /content/llama-build.log 2>&1')
+    try:
+        sh(f'cmake -S {LLAMA} -B {LLAMA}/build -DGGML_CUDA=ON -DLLAMA_CURL=OFF > /content/llama-build.log 2>&1')
+        sh(f'cmake --build {LLAMA}/build -j 12 --target llama-server llama-quantize >> /content/llama-build.log 2>&1')
+    except RuntimeError:
+        print(open('/content/llama-build.log').read()[-5000:])
+        raise
 sh(f'{sys.executable} -m pip install -q --no-deps {LLAMA}/gguf-py')
 GGUF = f'{TRAIN}/gguf'
 os.makedirs(GGUF, exist_ok=True)
