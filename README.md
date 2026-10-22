@@ -248,6 +248,7 @@ Each run writes to `runs/<timestamp>-<label>/`:
 ```bash
 python -m alfred.show runs/<run>/trajectories/<model>/plain/w1000-reschedule_and_notify__s0.json
 python -m alfred.report runs/<run-a> runs/<run-b>        # compare runs side by side
+python -m alfred.show runs/<run-a> runs/<run-b>          # read the same episodes from two runs, task by task
 python -m alfred.eval ... --resume runs/<run>            # continue an interrupted run
 python -m alfred.rescore runs/<run> --out runs/rescored  # re-grade old runs after a grading change, no model needed
 ```

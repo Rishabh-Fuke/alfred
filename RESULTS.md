@@ -339,7 +339,7 @@ Factory credits for teacher data.
 To check the numbers without rerunning anything, `python scripts/verify_results.py` recomputes the headline results
 from the committed per-episode files and per-item When2Call replies, with paired bootstrap intervals, and fails if any
 differs from what this page says. `python -m alfred.report results/2026-10-training/runs/<run> ...` rebuilds any
-report table, and `python -m alfred.rescore` re-grades saved episodes with the current grader (round 4's runs replay
+report table, `python -m alfred.show <run-a> <run-b>` prints the same episodes from two runs of the release, task by task, with a tally of clean successes, and `python -m alfred.rescore` re-grades saved episodes with the current grader (round 4's runs replay
 exactly; round 3's app runs predate the generator fix).
 
 Without a GPU, `python -m alfred.eval --agent oracle --templates apps,newapps --worlds 2` checks the environment (the
