@@ -144,7 +144,7 @@ The viewer writes one self-contained HTML page that shows:
 - A step-by-step replay of each episode: every tool call, which records were opened and whether they were needed, and how the simulated user judged each draft.
 - The system prompt and the tool list, exactly as the agent sees them.
 
-After you run a model, point the viewer at the run folder to replay the model's episodes the same way.
+After you run a model, point the viewer at the run folder to replay the model's episodes the same way. App tasks (`--templates apps`, `newapps` and the round 4 sets) have no inbox behind them, so for those the page shows the app instead: its tools, its records and the right move, with every argument in the replay marked right, wrong or made up.
 
 ## Which models
 
