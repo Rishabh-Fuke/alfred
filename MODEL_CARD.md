@@ -25,7 +25,11 @@ tags:
 
 # Alfred 4B
 
-**A 4B model that outperforms NVIDIA's 120B Nemotron 3 Super at knowing when to act, when to ask, and when to say it can't:** 0.70 vs 0.60 macro F1 on NVIDIA's When2Call benchmark.
+**Judgment doesn't come with size, but it can be trained.** On NVIDIA's When2Call benchmark (knowing when to call a
+tool, ask for missing information, or say it can't), NVIDIA's 120B Nemotron 3 Super scores no better than the
+untrained 4B: 0.60 vs 0.61 macro F1. Trained in Alfred, the same 4B reaches **0.70**, ahead of both and of the 30B
+Nemotron 3 Nano (0.66). The benchmark's authors found the same about size: performance "does not necessarily improve
+with model size" ([When2Call, NAACL 2025](https://arxiv.org/abs/2504.18851)).
 
 A 4B-parameter assistant model trained for **judgment in tool use**: call a tool when everything it needs was said,
 ask when a required detail is missing, look things up instead of guessing, and say "I can't" when no tool fits.
@@ -65,20 +69,22 @@ Our own runs, reasoning off. Everything below recomputes from the evidence in th
 [GitHub repo](https://github.com/Rishabh-Fuke/alfred) (`python scripts/verify_results.py`), and the full write-up is
 [RESULTS.md](https://github.com/Rishabh-Fuke/alfred/blob/main/RESULTS.md).
 
-| Measure | Nemotron 3 Nano 4B (base) | **Alfred 4B** | Nemotron 3 Super 120B |
-|---|---|---|---|
-| When2Call macro F1 | 0.61 | **0.70** | 0.60 |
-| When2Call: asked for missing information | 59% | **65%** | 57% |
-| When2Call: said "I can't" when no tool fits | 32% | **50%** | 30% |
-| When2Call: called a tool when it should | 94% | 96% | 96% |
-| BFCL multi-turn: asked for a missing detail | 23% | **28%** | |
-| BFCL multi-turn: said a tool was missing | 20% | 18% | |
-| Apps never trained on, clean success (tools) | 68% | **99%** | |
-| Made-up tool arguments on new tasks | 23% | **4%** | |
+| Measure | Nemotron 3 Nano 4B (base) | **Alfred 4B** | Nemotron 3 Nano 30B | Nemotron 3 Super 120B |
+|---|---|---|---|---|
+| When2Call macro F1 | 0.61 | **0.70** | 0.66 | 0.60 |
+| When2Call: asked for missing information | 59% | 65% | 69% | 57% |
+| When2Call: said "I can't" when no tool fits | 32% | **50%** | 38% | 30% |
+| When2Call: called a tool when it should | 94% | 96% | 93% | 96% |
+| BFCL multi-turn: asked for a missing detail | 23% | **28%** | | |
+| BFCL multi-turn: said a tool was missing | 20% | 18% | | |
+| Four app domains never trained on, clean success (tools) | 68% | **99%** | | |
+| Made-up tool arguments on new tasks | 23% | **4%** | | |
 
 On When2Call's 300 items, against Nemotron 3 Super on the same items and the same judge (paired bootstrap, 95%):
-macro F1 +0.10 [+0.06, +0.15], asking +8 points [+1, +15], saying "I can't" +20 points [+12, +29]. The base model
-and Super were run with their own settings (Super with reasoning on); Alfred 4B with reasoning off.
+macro F1 +0.10 [+0.06, +0.15], asking +8 points [+1, +15], saying "I can't" +20 points [+12, +29]. The base model,
+the 30B and Super were run with their own settings (the 30B and Super with reasoning on); Alfred 4B with reasoning
+off. The 30B asks for missing information more often (69%); Alfred 4B leads overall because it says "I can't" far more
+often when no tool fits.
 
 ## Use
 

@@ -12,7 +12,7 @@ requires-python = ">=3.9"
 dependencies = ["openai>=1.40"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "httpx"]  # httpx: a test builds an openai error by hand
 # Outside benchmarks (alfred.external). Install in their own environment: they pin their own dependencies.
 external = ["agentdojo>=0.1.35", "bfcl-eval>=2026.3.23", "soundfile"]
 # Training (alfred.train). On a GPU machine with vLLM installed, this reuses vLLM's torch and transformers.

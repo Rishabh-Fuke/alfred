@@ -96,6 +96,13 @@ def main() -> int:
         diff, lo, hi = paired(ours, sup, fn)
         checks.append((f"Round 4 beats Super on {name}: {diff:+.3f}, 95% CI [{lo:+.3f}, {hi:+.3f}]", lo, 0.0, lo > 0))
 
+    # 3b. The size comparison: the 120B is no better than the untrained 4B, and the 30B is the strongest baseline.
+    nano30 = when2call(BASELINE_EXT / "when2call-llm_judge-nvidia_NVIDIA-Nemotron-3-Nano-30B-A3B/responses.jsonl")
+    check("When2Call macro F1, untrained 4B", macro_f1(base, sorted(base)), 0.61)
+    check("When2Call macro F1, Nemotron 3 Nano 30B", macro_f1(nano30, sorted(nano30)), 0.66)
+    for lab, want in (("tool_call", 0.93), ("request_for_info", 0.69), ("cannot_answer", 0.38)):
+        check(f"When2Call {lab}, Nemotron 3 Nano 30B", rate(nano30, sorted(nano30), lab), want)
+
     # 4. The collapse and recovery of asking (When2Call, asked for missing information).
     round1 = json.loads((EXT / "when2call-llm_judge-alfred-rl_no-think-h2/summary.json").read_text())
     check("Asked for missing info, untrained 4B", rate(base, sorted(base), "request_for_info"), 0.59)
