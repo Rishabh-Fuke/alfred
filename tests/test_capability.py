@@ -61,6 +61,11 @@ def test_provider_shortcuts_and_keys(monkeypatch):
     assert alfred_eval.resolve_endpoint("ollama", None) == ("http://localhost:11434/v1", "local")
     assert alfred_eval.resolve_endpoint("http://x:1/v1", None) == ("http://x:1/v1", "local")
     assert alfred_eval.resolve_endpoint("http://x:1/v1", "k") == ("http://x:1/v1", "k")
+    assert alfred_eval.resolve_endpoint("https://api.tokenfactory.nebius.com/v1/", None)[1] == "nb-test"
+    # Not even to a host that only looks like the provider's, or to the provider over plain HTTP.
+    for lookalike in ("https://api.openai.com.evil.example/v1", "https://evil.example/api.tokenfactory.nebius.com/v1",
+                      "http://evil.example/v1?u=api.openai.com", "http://api.openai.com/v1"):
+        assert alfred_eval.resolve_endpoint(lookalike, None)[1] == "local"
     a = alfred_eval.parse_args(["--no-think", "--extra-body", '{"top_k": 20}'])
     assert alfred_eval.extra_body(a) == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
 

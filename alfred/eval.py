@@ -18,6 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .agents.llm import OpenAICompatAgent, chat_create
 from .agents.scripted import SCRIPTED_AGENTS
@@ -48,10 +49,16 @@ def _slug(text: str) -> str:
 def resolve_endpoint(base_url: str, api_key: str | None) -> tuple[str, str]:
     """A provider shortcut or URL, plus the key to use: --api-key, else that provider's own variable, else a dummy.
 
-    A key from the environment only ever goes to its own provider, never to another URL.
+    A key from the environment only ever goes to its own provider, never to another URL: the scheme and the host
+    (with any port) have to match the provider's exactly, so a look-alike host or a plain-HTTP URL gets no key.
     """
     url = PROVIDERS.get(base_url, (base_url, None))[0]
-    env_var = next((var for u, var in PROVIDERS.values() if var and u.split("/")[2] in url), None)
+
+    def origin(u: str):
+        p = urlparse(u)
+        return p.scheme, p.netloc.lower()
+
+    env_var = next((var for u, var in PROVIDERS.values() if var and origin(u) == origin(url)), None)
     key = api_key or (os.environ.get(env_var) if env_var else None) or "local"
     return url, key
 
