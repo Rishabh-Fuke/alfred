@@ -9,7 +9,7 @@ description = "An RL environment, eval harness and training pipeline that teache
 readme = "README.md"
 license = {text = "AGPL-3.0-only"}
 requires-python = ">=3.9"
-dependencies = ["openai>=1.40"]
+dependencies = ["openai>=1.40", "pydantic>=2"]  # pydantic: alfred.contracts (openai depends on it too)
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx"]  # httpx: a test builds an openai error by hand

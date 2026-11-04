@@ -8,7 +8,7 @@ Alfred is growing from a research project (training a 4B model for judgment in a
 
 This file maps the code as it is, records the design decisions and why, and defines the contracts Milestone 1 builds on. [THREAT_MODEL.md](THREAT_MODEL.md) covers what can go wrong, and which tests show it doesn't.
 
-**Status.** The judgment engine and a simulated runtime exist. The broker doesn't yet. Nothing in Alfred is isolated by the operating system: it all runs in one Python process with your user's permissions. The Milestone 1 broker will be an access-control prototype, and it's labeled as one.
+**Status.** The judgment engine and a simulated runtime exist. The broker's core exists and is tested on its own, but no environment or app uses it yet. Nothing in Alfred is isolated by the operating system: it all runs in one Python process with your user's permissions. The Milestone 1 broker is an access-control prototype, and it's labeled as one.
 
 ## 1. What exists today
 
@@ -22,6 +22,7 @@ This file maps the code as it is, records the design decisions and why, and defi
 | World | [`world.py`](../alfred/world.py) | One seeded, simulated person in an in-memory SQLite database. Sensitive records (lab results, therapy, a bank balance, a salary, a friend's divorce, a friend's secret, the home address and phone) carry canary strings, so a leak shows up as a string match. |
 | Simulated user and grader | [`user_sim.py`](../alfred/user_sim.py), [`checker.py`](../alfred/checker.py), [`reward.py`](../alfred/reward.py) | Answer questions and review drafts deterministically, then score the episode: clean success, overreach, leaks, injections acted on, made-up values. |
 | Live app | [`app/`](../alfred/app) | A local page where a person makes requests, answers Alfred's questions, and approves, edits or rejects each draft. It uses the same agent and environment, with the person in the simulated user's place. |
+| Permission broker (Milestone 1, not wired in yet) | [`broker/`](../alfred/broker), [`contracts/`](../alfred/contracts) | Grants a task read access to one folder. The model names files by handles and gets text through two read-only tools. Every call is checked against the grant and logged as metadata. Tested on its own in [`tests/security/`](../tests/security). |
 | Evaluation | [`eval.py`](../alfred/eval.py), [`external/`](../alfred/external), [`scripts/verify_results.py`](../scripts/verify_results.py) | Runs agents on Alfred's tasks and on When2Call, BFCL and AgentDojo, and recomputes the published numbers. |
 | Training | [`train/`](../alfred/train) | SFT, GRPO, export and serving for alfred-4b. |
 
@@ -46,10 +47,10 @@ This file maps the code as it is, records the design decisions and why, and defi
 | Part of the design | Today | Missing | Milestone |
 |---|---|---|---|
 | Judgment engine | The agent loop drives any environment with the interface above | An environment over real files | M1 |
-| Grants and resource handles | Simulation only: `read_policy="enforce"` refuses records a task doesn't need | Grants, handles, expiry, revocation, real files | M1 |
+| Grants and resource handles | The broker: grants, handles, expiry, revocation and budgets over a real folder. In the simulation, `read_policy="enforce"` refuses records a task doesn't need. | An environment and the app using the broker | M1 |
 | Consent | The gate freezes drafts and is the only writer; the page is the only approver | Granting a folder from the page (M1); binding each approval to a digest of the exact payload (M3) | M1, M3 |
-| File access | None | Read-only `files.list` and `files.read_text` on one chosen folder | M1 |
-| Audit | An in-memory event list with full arguments, for the page | A stored log that keeps metadata only | M1 |
+| File access | Read-only `files.list` and `files.read_text` in the broker, not offered to the model yet | A broker-backed environment and a seeded test folder | M1 |
+| Audit | The page's in-memory event list, with full arguments. The broker's log: metadata only, in memory or as JSON Lines. | The app keeping the broker's log and showing it | M1 |
 | Isolation | None: one process with the user's permissions | An OS sandbox around the agent runtime | M2 |
 | Real accounts | None: the world is simulated | One narrow integration, read and draft first | M3 |
 | Privacy bridge | Polish sends one draft's subject and body to Token Factory, only with `--cloud` | A preview of the exact payload, an outbound scan, a manifest, placeholders | M4 |
@@ -83,7 +84,7 @@ This file maps the code as it is, records the design decisions and why, and defi
 
 ## 4. Contracts for Milestone 1
 
-`alfred/contracts/` will define these as Pydantic models with `schema_version: "1"`, rejecting unknown fields. The model never sees a grant, a path or what a handle points to. It sees tool descriptions and tool results.
+[`alfred/contracts/`](../alfred/contracts) defines these as Pydantic models with `schema_version: "1"`. They reject unknown fields and don't coerce types. The model never sees a grant, a path outside the granted folder or what a handle points to. It sees tool descriptions and tool results.
 
 **Grant.** Held by the broker only.
 
@@ -93,38 +94,40 @@ This file maps the code as it is, records the design decisions and why, and defi
 | `task_id` | The one task it's for. Another task's calls are refused. |
 | `root` | The chosen folder, held open as a directory file descriptor, with its device and inode |
 | `operations` | A subset of `files.list` and `files.read_text` |
-| `limits` | Starting defaults: listing depth 5, 200 entries per listing, files over 2 MB refused unread, 6,000 characters per read (at most 20,000), 10 MB read per task, 200 calls |
-| `expires_at` | 30 minutes after it's granted, or when the task ends, whichever comes first |
+| `limits` | Starting defaults: listing depth 5, 200 entries per listing, files over 2 MB refused unread, 6,000 characters per read (at most 20,000), and 10 MB of text and 200 calls per grant. The byte budget is checked before each read, so the last read can go past it. |
+| `expires_at` | 30 minutes after it's granted |
 | `origin` | `page` or `cli`. A grant never comes from model output, a tool result or file content. |
-| `revoked_at` | Set when the person revokes it. Checked on every call, not only when the grant is made. |
+| `revoked_at` | Set when the person revokes it or the task ends. Checked on every call, not only when the grant is made. |
 
-**Resource handle.** `res_` plus 16 random bytes. A handle names the granted folder or one entry inside it, and only the broker that issued it can resolve it. A guessed handle, another task's handle, and an expired or revoked grant all get the same answer: not found or not granted. A handle records the device and inode it pointed to when it was listed; if the path now leads somewhere else, the call is refused.
+A task holds one live grant at a time. The broker refuses to grant the home folder or any folder above it: the person grants the folder Alfred needs. The path the person gives is theirs, so links in it are followed; nothing below it is.
+
+**Resource handle.** `res_` plus 16 random bytes, in hex. A handle names the granted folder or one entry inside it, and only the broker that issued it can resolve it. A guessed handle, another task's handle, and an expired or revoked grant all get the same answer: not found or not granted. A handle records the device and inode it pointed to when it was listed; if the path now leads somewhere else, the call is refused. An entry keeps its handle across listings, and a file that replaced it gets a new one.
 
 **Tools the model sees.** Built for each task from the grants it holds, so an operation that isn't granted isn't offered.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `files__list` | `folder`: a folder handle (optional; the granted folder by default) | Entries, each with a handle, name, kind (file or folder), size and modified time |
+| `files__list` | `folder`: a folder handle (optional; the granted folder by default) | Entries, each with a handle, name, path inside the granted folder, kind (file or folder) and modified time, plus a file's size; how many more didn't fit; how many were skipped |
 | `files__read_text` | `file`: a file handle; `max_chars` (optional) | The text, whether it was cut off, and the file's size |
 
-File names and file text are untrusted content: a file can be named like an instruction.
+A listing leaves out hidden entries (names starting with a dot, which Finder doesn't show either, so the person may not know they're granting them). It also leaves out symlinks, pipes, sockets, devices, files with more than one link and anything on another device, and says how many. File names and file text are untrusted content: a file can be named like an instruction.
 
-**Tool request and result.** A request carries the task id, the operation, a handle and arguments, and is checked against the tool's schema. A result has a status (`ok`, `denied` or `error`), the data for `ok`, a message the model may see, and the bytes returned. A denial never says whether something outside the grant exists.
+**Tool request and result.** A request carries the task id, the operation, a handle and arguments. Any other argument is refused. A result has a status (`ok`, `denied` or `error`), a reason code, the data for `ok`, a message, and the bytes of file text returned. The model sees only the data or the message (`ToolResult.for_model()`); the reason is for Alfred's own code and the audit log. Every reason outside the grant (no grant, an unknown handle, an expired or revoked grant) gets the same message, so a denial never says whether something outside the grant exists. An operation the broker doesn't know, or one the grant doesn't include, gets another.
 
-**How the broker opens a file.** It walks from the root's file descriptor one path component at a time, never following a symlink (`O_NOFOLLOW`), and refuses a file with more than one hard link or on another device. Checking the path with string operations isn't enough: a folder could be swapped for a symlink between a check and the open.
+**How the broker opens a file.** It walks from the root's file descriptor one path component at a time, never following a symlink (`O_NOFOLLOW`), and refuses a file with more than one hard link or on another device. Checking the path with string operations isn't enough: a folder could be swapped for a symlink between a check and the open. Files are opened read-only and without blocking, so a pipe can't stall a read. A NUL byte means binary, which is refused; bytes that aren't UTF-8 become U+FFFD. On macOS, opening a symlinked folder with `O_DIRECTORY | O_NOFOLLOW` fails with "not a directory" rather than the symlink error, so the broker looks at the entry itself to record why.
 
-**Audit event.** For every call: time, task id, request id, operation, handle, allowed or denied, a reason code (such as `no_grant`, `expired`, `revoked`, `symlink`, `hard_link`, `other_device`, `too_large`, `not_text` or `budget`), bytes and result. File contents, paths, names and prompts never go in the stored log. The page can show file names while the grant lasts.
+**Audit event.** For every call: time, request id, task id, grant id, operation, handle, status, a reason code (`no_grant`, `unknown_handle`, `expired`, `revoked`, `unknown_operation`, `not_granted`, `symlink`, `hard_link`, `other_device`, `changed`, `too_deep`, `too_large`, `not_text`, `budget`, `wrong_kind`, `bad_arguments` or `io_error`) and the bytes returned. The schema takes only ids the broker issued, operation names it knows, reason codes and counts. So file contents, paths, names, prompts and anything the model wrote can't be stored: a made-up handle or task id is recorded as empty. The log is kept in memory and, given a path, as JSON Lines that only its owner can read. The page can show file names while the grant lasts.
 
-**Agent decision.** Derived by the adapter (D2) from each step, with `schema_version`, `task_id`, the decision, and its tool request, question, proposed action or final message. It feeds the audit panel and the task's state; nothing executes because of it.
+**Agent decision.** Derived by the adapter (D2) from each step, with `schema_version`, `task_id`, the decision, and the one field that goes with it: `tool_request`, `proposed_action`, `user_question`, `message` (the answer, or why Alfred declined) or `delegation_proposal`. A decision without its field, or with another's, is rejected. It feeds the audit panel and the task's state; nothing executes because of it. The adapter comes with the broker-backed environment.
 
-**Task states in Milestone 1.** `running`, then `awaiting_clarification` or `calling_tool` as needed, and finally `completed`, `declined`, `failed` or `canceled`. Canceling a task revokes its grants. Milestone 1 has no consequential actions and no cloud, so the `awaiting_action_approval` and `awaiting_cloud_consent` states come later.
+**Task states in Milestone 1.** `running`, then `awaiting_clarification` or `calling_tool` as needed, and finally `completed`, `declined`, `failed` or `canceled`. Ending a task, however it ends, revokes its grants. Milestone 1 has no consequential actions and no cloud, so the `awaiting_action_approval` and `awaiting_cloud_consent` states come later.
 
 ## 5. Milestones
 
 | Milestone | Work | Gate |
 |---|---|---|
 | M0: inventory, contracts, threat model | The consent channel (161e2e9). This file and [THREAT_MODEL.md](THREAT_MODEL.md). The app names the model's host when it isn't this computer, and an API key from the environment goes only to its own provider's exact host. | Existing tests pass; trusted and untrusted parts and the privilege boundaries are written down. |
-| M1: read-only folder prototype | The contracts, the broker and its security tests. A broker-backed environment with a seeded course folder (deadlines, a conflicting date, an injection file), run with the stock model. Granting a folder in the app (first with `--grant`), a brokered live mode and an audit panel. | Legitimate reads work. An unrelated folder, a symlink escape and the injection file's requests are refused by the broker, whatever the model does. The research suite still passes. |
+| M1: read-only folder prototype | Done: the contracts, the broker and its security tests. Next: a broker-backed environment with a seeded course folder (deadlines, a conflicting date, an injection file), run with the stock model. Granting a folder in the app (first with `--grant`), a brokered live mode and an audit panel. | Legitimate reads work. An unrelated folder, a symlink escape and the injection file's requests are refused by the broker, whatever the model does. The research suite still passes. |
 | M2: OS isolation | The agent runtime behind a real OS boundary, with the broker outside it; authenticated local IPC; no network except to the broker and the model. | Tests show the boundary itself holds, not just Python checks. |
 | M3: one real integration | Calendar or email, read and draft first, then approvals bound to the exact payload. | Denial, invalidation by edits, duplicate sends, retries and postconditions are tested against a fake provider. |
 | M4: privacy bridge | Context selection, local placeholders, an outbound scan, a preview of the exact payload, a manifest, one provider. | Tests read the bytes actually sent. |
