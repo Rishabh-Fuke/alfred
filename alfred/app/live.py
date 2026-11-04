@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import itertools
 import json
+import secrets
 import threading
 import time
 from dataclasses import dataclass, field
@@ -240,8 +241,9 @@ class Session:
                 self.running, self.pending = False, None
 
     def wait_for(self, kind: str, payload: dict) -> dict:
-        """Called from the agent's thread: show the page a draft or a question and wait for the person."""
-        p = Pending(id=f"p{next(self._ids)}", kind=kind, payload=payload)
+        """Called from the agent's thread: show the page a draft or a question and wait for the person. The id can't be
+        guessed, so only a page that was shown the draft can answer it."""
+        p = Pending(id=f"p_{secrets.token_urlsafe(12)}", kind=kind, payload=payload)
         with self.lock:
             self.pending = p
         self.emit(kind, pending_id=p.id, **payload)
@@ -273,7 +275,8 @@ class Session:
         if p is None or p.id != pending_id or p.kind != "approval" or p.payload["kind"] != "email":
             raise KeyError("Only a pending email can be polished.")
         if self.polish_client is None:
-            raise RuntimeError("Set NEBIUS_API_KEY to polish drafts with Nemotron 3 Super on Token Factory.")
+            raise RuntimeError("Start Alfred with --cloud and NEBIUS_API_KEY set to polish drafts with Nemotron 3 Super "
+                               "on Token Factory.")
         a = p.payload["action"]
         sent = {"subject": a.get("subject", ""), "body": a.get("body", "")}
         resp = chat_create(self.polish_client, POLISH_MODEL, max_tokens=2048, temperature=0.3,

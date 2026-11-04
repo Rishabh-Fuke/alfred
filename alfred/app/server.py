@@ -3,14 +3,24 @@
     python -m alfred.app --model alfred-4b --base-url ollama          # a model served by Ollama
     python -m alfred.app --model alfred-rl --base-url vllm            # or by vLLM
 
-Everything runs on this machine except one optional button: "Polish with Nemotron 3 Super" sends a pending
-email's subject and body (nothing else) to Token Factory, if NEBIUS_API_KEY is set.
+Everything runs on this machine except one optional button: with --cloud and NEBIUS_API_KEY set, "Polish with
+Nemotron 3 Super" sends a pending email's subject and body (nothing else) to Token Factory.
+
+The page is where drafts get approved, so the API answers only that page. It listens on this computer only, refuses
+requests addressed to any other host name (DNS rebinding) or sent from any other page (cross-site requests), and wants
+the key from the link the app prints, which no other page or user can read.
 """
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import hmac
+import ipaddress
 import json
 import os
+import re
+import secrets
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +30,28 @@ from urllib.parse import parse_qs, urlparse
 from .live import Session
 
 STATIC = Path(__file__).parent / "static"
+TOKEN_HEADER = "X-Alfred-Token"
+MAX_BODY = 1_000_000
+_SCRIPT = re.compile(rb"<script\b[^>]*>(.*?)</script>", re.S)
+
+
+def page_policy(page: bytes) -> str:
+    """The page's Content-Security-Policy: only its own inline script runs (by hash), it talks only to this server,
+    and no other site can frame it. Text from emails or files that slipped into the page as markup still couldn't run
+    script, send anything anywhere, or be clicked through from inside another site's page."""
+    hashes = " ".join("'sha256-" + base64.b64encode(hashlib.sha256(s.replace(b"\r\n", b"\n")).digest()).decode() + "'"
+                      for s in _SCRIPT.findall(page))
+    return (f"default-src 'none'; script-src {hashes}; style-src 'self' 'unsafe-inline'; font-src 'self'; "
+            "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+
+
+def is_loopback(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def make_handler(app: "App"):
@@ -27,11 +59,16 @@ def make_handler(app: "App"):
         def log_message(self, *args):
             pass
 
-        def _send(self, code: int, body: bytes, kind: str = "application/json"):
+        def _send(self, code: int, body: bytes, kind: str = "application/json", policy: str | None = None):
             self.send_response(code)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            if policy:
+                self.send_header("Content-Security-Policy", policy)
             self.end_headers()
             self.wfile.write(body)
 
@@ -42,10 +79,28 @@ def make_handler(app: "App"):
             n = int(self.headers.get("Content-Length") or 0)
             return json.loads(self.rfile.read(n) or b"{}") if n else {}
 
+        def _refused(self, api: bool) -> bool:
+            """Answers a request that might not come from Alfred's own page with 403, and says so (True)."""
+            if self.headers.get("Host") not in app.hosts:
+                self._json({"error": "Alfred only answers requests addressed to this computer."}, 403)
+                return True
+            origin = self.headers.get("Origin")
+            if origin is not None and origin not in app.origins:
+                self._json({"error": "Alfred only answers its own page."}, 403)
+                return True
+            if api and not hmac.compare_digest(self.headers.get(TOKEN_HEADER, "").encode(), app.token.encode()):
+                self._json({"error": "Open Alfred with the link it printed in your terminal. That link carries the "
+                                     "key for this run."}, 403)
+                return True
+            return False
+
         def do_GET(self):  # noqa: N802 - http.server API
             url = urlparse(self.path)
+            if self._refused(api=url.path.startswith("/api/")):
+                return
             if url.path in ("/", "/index.html"):
-                return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
+                page = (STATIC / "index.html").read_bytes()
+                return self._send(200, page, "text/html; charset=utf-8", policy=page_policy(page))
             if url.path.startswith("/static/"):
                 f = (STATIC / url.path[len("/static/"):]).resolve()
                 if STATIC.resolve() in f.parents and f.is_file():
@@ -63,8 +118,15 @@ def make_handler(app: "App"):
             self._json({"error": "not found"}, 404)
 
         def do_POST(self):  # noqa: N802 - http.server API
-            path, body, s = urlparse(self.path).path, self._body(), app.session
+            if self._refused(api=True):
+                return
+            if self.headers.get_content_type() != "application/json":
+                return self._json({"error": "Send JSON."}, 415)
+            if int(self.headers.get("Content-Length") or 0) > MAX_BODY:
+                return self._json({"error": "That's too long."}, 413)
+            path, s = urlparse(self.path).path, app.session
             try:
+                body = self._body()
                 if path == "/api/request":
                     text = (body.get("text") or "").strip()
                     if not text:
@@ -100,13 +162,21 @@ class App:
 
         from ..eval import resolve_endpoint
         self.a = a
+        self.token = secrets.token_urlsafe(32)
+        self.hosts: set[str] = set()
+        self.origins: set[str] = set()
         url, key = resolve_endpoint(a.base_url, a.api_key)
         self.client = OpenAI(base_url=url, api_key=key, timeout=300, max_retries=2)
         tf_key = os.environ.get("NEBIUS_API_KEY")
         self.polish_client = (OpenAI(base_url="https://api.tokenfactory.nebius.com/v1/", api_key=tf_key, timeout=120)
-                              if tf_key and not a.no_cloud else None)
+                              if a.cloud and tf_key and not a.no_cloud else None)
         self.memory_path = Path(a.memory).expanduser() if a.memory else None
         self.reset(a.world)
+
+    def listen_on(self, host: str, port: int) -> None:
+        """The host names and page origins the server answers, once the port is known."""
+        self.hosts = {f"{h}:{port}" for h in (host, "127.0.0.1", "localhost")}
+        self.origins = {f"http://{h}" for h in self.hosts}
 
     def reset(self, seed: int) -> None:
         old = getattr(self, "session", None)
@@ -129,16 +199,24 @@ def parse_args(argv=None):
     p.add_argument("--world", type=int, default=1000, help="Which simulated person's inbox to use.")
     p.add_argument("--memory", default="~/.alfred-memory.json", help="Where to keep answers to earlier questions.")
     p.add_argument("--no-memory", action="store_true")
-    p.add_argument("--no-cloud", action="store_true", help="Never call Token Factory, even with a key set.")
-    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--cloud", action="store_true",
+                   help="Turn on the Polish button, which sends one email draft to Token Factory (needs NEBIUS_API_KEY). "
+                        "Off by default: nothing leaves this computer.")
+    p.add_argument("--no-cloud", action="store_true", help=argparse.SUPPRESS)  # the default now; kept for old scripts
+    p.add_argument("--host", default="127.0.0.1", help="A loopback address: the page approves drafts, so it never "
+                                                       "listens on the network.")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true")
     return p.parse_args(argv)
 
 
 def serve(a) -> ThreadingHTTPServer:
+    if not is_loopback(a.host):
+        raise SystemExit(f"--host {a.host}: Alfred's page approves drafts, so it only listens on this computer "
+                         f"(127.0.0.1).")
     app = App(a)
     server = ThreadingHTTPServer((a.host, a.port), make_handler(app))
+    app.listen_on(a.host, server.server_address[1])
     server.app = app
     return server
 
@@ -146,8 +224,16 @@ def serve(a) -> ThreadingHTTPServer:
 def main(argv=None):
     a = parse_args(argv)
     server = serve(a)
-    url = f"http://{a.host}:{server.server_address[1]}/"
-    print(f"Alfred is running at {url} with {a.model}. Press Ctrl+C to stop.")
+    app = server.app
+    url = f"http://{a.host}:{server.server_address[1]}/#k={app.token}"
+    print(f"Alfred is running with {a.model}. Open it with this link, which carries the key for this run:\n  {url}\n"
+          f"Press Ctrl+C to stop.")
+    if app.polish_client:
+        print("Cloud: on for the Polish button only (one email draft at a time, to Nemotron 3 Super on Token Factory).")
+    elif a.cloud and not a.no_cloud:
+        print("Cloud: off. --cloud needs NEBIUS_API_KEY set.")
+    else:
+        print("Cloud: off. Nothing leaves this computer.")
     if not a.no_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:
