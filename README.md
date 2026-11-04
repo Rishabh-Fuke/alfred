@@ -323,6 +323,7 @@ alfred/
   train/          data (teacher filtering), render (chat-template masking), sft, grpo, rollout, serve (vLLM),
                   export (merge an adapter into the base checkpoint)
   app/            the local web app: a person approves drafts and answers questions (live.py, server.py, static/)
+docs/             ARCHITECTURE.md (where Alfred is going: a permission broker and a privacy bridge) and THREAT_MODEL.md
 tests/            about 230 tests, including SFT and GRPO end to end on a tiny CPU model against a fake vLLM server
 notebooks/        Colab notebooks: the Nemotron baseline, and training (make_train_notebook.py writes it)
 results/          the September and October baselines, and the three training rounds (2026-10-training)
