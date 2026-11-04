@@ -403,7 +403,8 @@ async function loadWorld() {
   state.names = Object.fromEntries(w.contacts.map((c) => [c.email, c.name]));
   $("#whose").innerHTML = `Working on <b>${esc(w.user.name)}</b>'s email, calendar and contacts (a simulated person). Today is ${esc(w.now)}.`;
   $("#runs-on span:last-child").textContent = `${w.model}, on this computer`;
-  $("#suggestions").innerHTML = w.suggestions.map((s) =>
+  const suggestions = $("#suggestions");  // gone once the first request starts
+  if (suggestions) suggestions.innerHTML = w.suggestions.map((s) =>
     `<li><button class="suggestion" data-text="${esc(s.text)}"><span class="say">${esc(s.text)}</span><span class="why">${esc(s.why)}</span></button></li>`).join("");
   $("#use-memory").checked = w.use_memory;
   renderMemory();
