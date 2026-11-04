@@ -3,8 +3,10 @@
     python -m alfred.app --model alfred-4b --base-url ollama          # a model served by Ollama
     python -m alfred.app --model alfred-rl --base-url vllm            # or by vLLM
 
-Everything runs on this machine except one optional button: with --cloud and NEBIUS_API_KEY set, "Polish with
-Nemotron 3 Super" sends a pending email's subject and body (nothing else) to Token Factory.
+With a model served on this computer, everything runs here except one optional button: with --cloud and
+NEBIUS_API_KEY set, "Polish with Nemotron 3 Super" sends a pending email's subject and body (nothing else) to Token
+Factory. A hosted model (--base-url tokenfactory, openai or any other host) gets every request and everything Alfred
+reads; the terminal and the page say so.
 
 The page is where drafts get approved, so the API answers only that page. It listens on this computer only, refuses
 requests addressed to any other host name (DNS rebinding) or sent from any other page (cross-site requests), and wants
@@ -108,7 +110,7 @@ def make_handler(app: "App"):
                             ".svg": "image/svg+xml"}.get(f.suffix, "application/octet-stream")
                     return self._send(200, f.read_bytes(), kind)
             if url.path == "/api/world":
-                return self._json(app.session.world_view())
+                return self._json({**app.session.world_view(), "model_host": app.model_host})
             if url.path == "/api/events":
                 since = int(parse_qs(url.query).get("since", ["0"])[0])
                 s = app.session
@@ -167,6 +169,8 @@ class App:
         self.origins: set[str] = set()
         url, key = resolve_endpoint(a.base_url, a.api_key)
         self.client = OpenAI(base_url=url, api_key=key, timeout=300, max_retries=2)
+        host = urlparse(url).hostname or ""
+        self.model_host = None if is_loopback(host) else (host or url)  # where the model runs, if not on this computer
         tf_key = os.environ.get("NEBIUS_API_KEY")
         self.polish_client = (OpenAI(base_url="https://api.tokenfactory.nebius.com/v1/", api_key=tf_key, timeout=120)
                               if a.cloud and tf_key and not a.no_cloud else None)
@@ -191,7 +195,9 @@ class App:
 def parse_args(argv=None):
     p = argparse.ArgumentParser(prog="python -m alfred.app", description="Alfred, with you approving every draft.")
     p.add_argument("--model", required=True, help="Model name on the server, e.g. alfred-4b.")
-    p.add_argument("--base-url", default="ollama", help="Server URL or shortcut: ollama, vllm, tokenfactory, openai.")
+    p.add_argument("--base-url", default="ollama",
+                   help="Server URL or shortcut: ollama or vllm (on this computer), tokenfactory or openai (hosted, so "
+                        "everything Alfred reads is sent there).")
     p.add_argument("--api-key", default=None)
     p.add_argument("--tool-mode", default="native", choices=["native", "json"])
     p.add_argument("--temperature", type=float, default=0.3)
@@ -201,7 +207,7 @@ def parse_args(argv=None):
     p.add_argument("--no-memory", action="store_true")
     p.add_argument("--cloud", action="store_true",
                    help="Turn on the Polish button, which sends one email draft to Token Factory (needs NEBIUS_API_KEY). "
-                        "Off by default: nothing leaves this computer.")
+                        "Off by default.")
     p.add_argument("--no-cloud", action="store_true", help=argparse.SUPPRESS)  # the default now; kept for old scripts
     p.add_argument("--host", default="127.0.0.1", help="A loopback address: the page approves drafts, so it never "
                                                        "listens on the network.")
@@ -221,6 +227,22 @@ def serve(a) -> ThreadingHTTPServer:
     return server
 
 
+def cloud_status(a, app: App) -> list[str]:
+    """What leaves this computer, as the terminal says it. The page says the same."""
+    lines = []
+    if app.model_host:
+        lines.append(f"Not on this computer: the model runs at {app.model_host}, so your requests and everything "
+                     f"Alfred reads are sent there.")
+    if app.polish_client:
+        lines.append("Cloud: on for the Polish button (one email draft at a time, to Nemotron 3 Super on Token "
+                     "Factory).")
+    elif a.cloud and not a.no_cloud:
+        lines.append("The Polish button is off: --cloud needs NEBIUS_API_KEY set.")
+    if not app.model_host and not app.polish_client:
+        lines.append("Cloud: off. Nothing leaves this computer.")
+    return lines
+
+
 def main(argv=None):
     a = parse_args(argv)
     server = serve(a)
@@ -228,12 +250,8 @@ def main(argv=None):
     url = f"http://{a.host}:{server.server_address[1]}/#k={app.token}"
     print(f"Alfred is running with {a.model}. Open it with this link, which carries the key for this run:\n  {url}\n"
           f"Press Ctrl+C to stop.")
-    if app.polish_client:
-        print("Cloud: on for the Polish button only (one email draft at a time, to Nemotron 3 Super on Token Factory).")
-    elif a.cloud and not a.no_cloud:
-        print("Cloud: off. --cloud needs NEBIUS_API_KEY set.")
-    else:
-        print("Cloud: off. Nothing leaves this computer.")
+    for line in cloud_status(a, app):
+        print(line)
     if not a.no_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:

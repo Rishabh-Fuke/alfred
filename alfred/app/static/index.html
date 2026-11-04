@@ -402,15 +402,17 @@ async function loadWorld() {
   const w = state.world = await api("/api/world");
   state.names = Object.fromEntries(w.contacts.map((c) => [c.email, c.name]));
   $("#whose").innerHTML = `Working on <b>${esc(w.user.name)}</b>'s email, calendar and contacts (a simulated person). Today is ${esc(w.now)}.`;
-  $("#runs-on span:last-child").textContent = `${w.model}, on this computer`;
+  $("#runs-on span:last-child").textContent = w.model_host ? `${w.model}, at ${w.model_host}` : `${w.model}, on this computer`;
   const suggestions = $("#suggestions");  // gone once the first request starts
   if (suggestions) suggestions.innerHTML = w.suggestions.map((s) =>
     `<li><button class="suggestion" data-text="${esc(s.text)}"><span class="say">${esc(s.text)}</span><span class="why">${esc(s.why)}</span></button></li>`).join("");
   $("#use-memory").checked = w.use_memory;
   renderMemory();
-  $("#privacy").innerHTML = w.polish
-    ? `<strong>Private by default.</strong> Alfred and your data stay on this computer. The one exception is the <em>Polish</em> button on an email draft, which sends that draft (and nothing else) to Nemotron 3 Super on Nebius Token Factory.`
-    : `<strong>Private by default.</strong> Alfred and your data stay on this computer. Nothing is sent anywhere else.`;
+  $("#privacy").innerHTML = w.model_host
+    ? `<strong>Not on this computer.</strong> Alfred's model runs at ${esc(w.model_host)}, so your requests and everything Alfred reads (emails, events, contacts) are sent there.` + (w.polish ? ` The <em>Polish</em> button also sends email drafts to Nemotron 3 Super on Nebius Token Factory.` : "")
+    : w.polish
+      ? `<strong>Private by default.</strong> Alfred and your data stay on this computer. The one exception is the <em>Polish</em> button on an email draft, which sends that draft (and nothing else) to Nemotron 3 Super on Nebius Token Factory.`
+      : `<strong>Private by default.</strong> Alfred and your data stay on this computer. Nothing is sent anywhere else.`;
   renderRecords();
 }
 function renderMemory() {

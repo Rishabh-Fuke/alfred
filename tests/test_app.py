@@ -1,8 +1,10 @@
 """The local app with a person in the loop, driven over HTTP the way the page drives it."""
 import base64
 import hashlib
+import ipaddress
 import json
 import re
+import socket
 import time
 import urllib.request
 
@@ -181,6 +183,43 @@ def test_cloud_is_off_unless_asked_for(monkeypatch):
     assert polish_client() is None  # a key in the environment isn't a yes
     assert polish_client("--cloud") is not None
     assert polish_client("--cloud", "--no-cloud") is None
+
+
+def test_with_a_local_model_nothing_leaves_this_computer(app, monkeypatch):
+    base, application, _ = app
+    assert application.model_host is None and _call(base, "/api/world")[1]["model_host"] is None
+    reached = []
+    connect = socket.socket.connect
+
+    def spy(sock, address):
+        reached.append(address)
+        return connect(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", spy)  # every connection the app, the agent or this test opens
+    task = next(t for t in generate_tasks(1000, 1) if t.template == "reply_with_info")
+    _call(base, "/api/request", {"text": task.instruction})
+    draft, since, _ = _wait(base, 0, "approval")
+    _call(base, "/api/respond", {"pending_id": draft["pending_id"], "response": {"approve": True}})
+    _wait(base, since, "done")
+    assert reached and all(ipaddress.ip_address(address[0]).is_loopback for address in reached)
+
+
+def test_a_hosted_model_is_never_called_local(monkeypatch):
+    monkeypatch.delenv("NEBIUS_API_KEY", raising=False)
+
+    def status(base_url, *flags):
+        a = app_server.parse_args(["--model", "m", "--base-url", base_url, "--memory", "", *flags])
+        application = app_server.App(a)
+        return application.model_host, app_server.cloud_status(a, application)
+
+    for local in ("ollama", "vllm", "http://127.0.0.1:9/v1", "http://localhost:11434/v1", "http://[::1]:8000/v1"):
+        assert status(local) == (None, ["Cloud: off. Nothing leaves this computer."])
+    for hosted, host in (("tokenfactory", "api.tokenfactory.nebius.com"), ("https://model.example/v1", "model.example")):
+        where, lines = status(hosted)
+        assert where == host and host in lines[0] and not any("Nothing leaves" in line for line in lines)
+    monkeypatch.setenv("NEBIUS_API_KEY", "not-a-real-key")
+    where, lines = status("tokenfactory", "--cloud")
+    assert len(lines) == 2 and "Polish" in lines[1]
 
 
 def test_it_only_listens_on_this_computer():
