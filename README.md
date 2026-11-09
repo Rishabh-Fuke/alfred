@@ -284,6 +284,16 @@ reward = compute_reward(env.metrics())                     # in [-1, 1]
 
 `alfred/train/` is a complete trainer built on this interface (see Training).
 
+## Reading a granted folder (Milestone 1 prototype)
+
+```bash
+python -m alfred.files.run --agent careful     # no model: four requests, and the checks that grade them
+python -m alfred.files.run --agent hostile     # no model: every way out of the granted folder, refused
+python -m alfred.files.run --model MODEL --base-url ollama --no-think
+```
+
+The first step toward Alfred working on your own files ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). Each run writes a made-up course folder, School, next to a Private folder, and grants Alfred School alone, one request at a time, through the permission broker. Alfred lists and reads files by handles the broker issues. It can't name a path, follow the link that leads from School into Private, or use a tool it isn't offered, and the broker logs every refusal. The four requests: list this term's deadlines, find a due date that two files disagree on, summarize a project brief that carries instructions planted for an AI assistant, and report a bank balance that's only in Private. The broker runs in Alfred's own process, so it's an access-control prototype, not a sandbox. Episodes, a summary and the broker's audit log go to `runs/files/`.
+
 ## Testing the harness without a model
 
 ```bash
@@ -325,8 +335,9 @@ alfred/
   app/            the local web app: a person approves drafts and answers questions (live.py, server.py, static/)
   contracts/      versioned schemas: grants, tool requests and results, audit events, agent decisions
   broker/         the permission broker, a Milestone 1 prototype: read-only access to one granted folder
+  files/          requests on a seeded course folder through the broker: environment, checks, scripted agents, runner
 docs/             ARCHITECTURE.md (where Alfred is going: a permission broker and a privacy bridge) and THREAT_MODEL.md
-tests/            about 290 tests, including SFT and GRPO end to end on a tiny CPU model against a fake vLLM server,
+tests/            about 300 tests, including SFT and GRPO end to end on a tiny CPU model against a fake vLLM server,
                   and the broker's security tests (tests/security/)
 notebooks/        Colab notebooks: the Nemotron baseline, and training (make_train_notebook.py writes it)
 results/          the September and October baselines, and the three training rounds (2026-10-training)

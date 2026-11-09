@@ -8,7 +8,7 @@ Alfred is growing from a research project (training a 4B model for judgment in a
 
 This file maps the code as it is, records the design decisions and why, and defines the contracts Milestone 1 builds on. [THREAT_MODEL.md](THREAT_MODEL.md) covers what can go wrong, and which tests show it doesn't.
 
-**Status.** The judgment engine and a simulated runtime exist. The broker's core exists and is tested on its own, but no environment or app uses it yet. Nothing in Alfred is isolated by the operating system: it all runs in one Python process with your user's permissions. The Milestone 1 broker is an access-control prototype, and it's labeled as one.
+**Status.** The judgment engine and a simulated runtime exist. So do the broker and a file environment that reads a seeded course folder through it; the app doesn't use the broker yet. Nothing in Alfred is isolated by the operating system: it all runs in one Python process with your user's permissions. The Milestone 1 broker is an access-control prototype, and it's labeled as one.
 
 ## 1. What exists today
 
@@ -22,7 +22,8 @@ This file maps the code as it is, records the design decisions and why, and defi
 | World | [`world.py`](../alfred/world.py) | One seeded, simulated person in an in-memory SQLite database. Sensitive records (lab results, therapy, a bank balance, a salary, a friend's divorce, a friend's secret, the home address and phone) carry canary strings, so a leak shows up as a string match. |
 | Simulated user and grader | [`user_sim.py`](../alfred/user_sim.py), [`checker.py`](../alfred/checker.py), [`reward.py`](../alfred/reward.py) | Answer questions and review drafts deterministically, then score the episode: clean success, overreach, leaks, injections acted on, made-up values. |
 | Live app | [`app/`](../alfred/app) | A local page where a person makes requests, answers Alfred's questions, and approves, edits or rejects each draft. It uses the same agent and environment, with the person in the simulated user's place. |
-| Permission broker (Milestone 1, not wired in yet) | [`broker/`](../alfred/broker), [`contracts/`](../alfred/contracts) | Grants a task read access to one folder. The model names files by handles and gets text through two read-only tools. Every call is checked against the grant and logged as metadata. Tested on its own in [`tests/security/`](../tests/security). |
+| Permission broker (Milestone 1) | [`broker/`](../alfred/broker), [`contracts/`](../alfred/contracts) | Grants a task read access to one folder. The model names files by handles and gets text through two read-only tools. Every call is checked against the grant and logged as metadata. Tested on its own in [`tests/security/`](../tests/security). |
+| File requests (Milestone 1) | [`files/`](../alfred/files) | A seeded course folder, School, beside a Private folder it never grants. An environment that reads School through the broker under the same agent loop, recording an agent decision per step. Four requests with checks, a careful and a hostile scripted agent, and a runner (`python -m alfred.files.run`). |
 | Evaluation | [`eval.py`](../alfred/eval.py), [`external/`](../alfred/external), [`scripts/verify_results.py`](../scripts/verify_results.py) | Runs agents on Alfred's tasks and on When2Call, BFCL and AgentDojo, and recomputes the published numbers. |
 | Training | [`train/`](../alfred/train) | SFT, GRPO, export and serving for alfred-4b. |
 
@@ -46,10 +47,10 @@ This file maps the code as it is, records the design decisions and why, and defi
 
 | Part of the design | Today | Missing | Milestone |
 |---|---|---|---|
-| Judgment engine | The agent loop drives any environment with the interface above | An environment over real files | M1 |
-| Grants and resource handles | The broker: grants, handles, expiry, revocation and budgets over a real folder. In the simulation, `read_policy="enforce"` refuses records a task doesn't need. | An environment and the app using the broker | M1 |
+| Judgment engine | The agent loop drives any environment with the interface above, the file environment included. First runs with the stock model on the course folder. | The Milestone 1 gate: repeated runs, with alfred-4b beside the stock model | M1 |
+| Grants and resource handles | The broker: grants, handles, expiry, revocation and budgets over a real folder. In the simulation, `read_policy="enforce"` refuses records a task doesn't need. | The app using the broker | M1 |
 | Consent | The gate freezes drafts and is the only writer; the page is the only approver | Granting a folder from the page (M1); binding each approval to a digest of the exact payload (M3) | M1, M3 |
-| File access | Read-only `files.list` and `files.read_text` in the broker, not offered to the model yet | A broker-backed environment and a seeded test folder | M1 |
+| File access | Read-only `files.list` and `files.read_text` through the broker, offered by the file environment on a seeded course folder | The app granting a folder the person chooses | M1 |
 | Audit | The page's in-memory event list, with full arguments. The broker's log: metadata only, in memory or as JSON Lines. | The app keeping the broker's log and showing it | M1 |
 | Isolation | None: one process with the user's permissions | An OS sandbox around the agent runtime | M2 |
 | Real accounts | None: the world is simulated | One narrow integration, read and draft first | M3 |
@@ -118,7 +119,7 @@ A listing leaves out hidden entries (names starting with a dot, which Finder doe
 
 **Audit event.** For every call: time, request id, task id, grant id, operation, handle, status, a reason code (`no_grant`, `unknown_handle`, `expired`, `revoked`, `unknown_operation`, `not_granted`, `symlink`, `hard_link`, `other_device`, `changed`, `too_deep`, `too_large`, `not_text`, `budget`, `wrong_kind`, `bad_arguments` or `io_error`) and the bytes returned. The schema takes only ids the broker issued, operation names it knows, reason codes and counts. So file contents, paths, names, prompts and anything the model wrote can't be stored: a made-up handle or task id is recorded as empty. The log is kept in memory and, given a path, as JSON Lines that only its owner can read. The page can show file names while the grant lasts.
 
-**Agent decision.** Derived by the adapter (D2) from each step, with `schema_version`, `task_id`, the decision, and the one field that goes with it: `tool_request`, `proposed_action`, `user_question`, `message` (the answer, or why Alfred declined) or `delegation_proposal`. A decision without its field, or with another's, is rejected. It feeds the audit panel and the task's state; nothing executes because of it. The adapter comes with the broker-backed environment.
+**Agent decision.** Derived by the adapter (D2) from each step, with `schema_version`, `task_id`, the decision, and the one field that goes with it: `tool_request`, `proposed_action`, `user_question`, `message` (the answer, or why Alfred declined) or `delegation_proposal`. A decision without its field, or with another's, is rejected. It feeds the audit panel and the task's state; nothing executes because of it. The file environment records one per step: a call to any tool but the two conversation tools is `request_tool`, even one that doesn't exist, and goes to the broker; a question is `ask_user`; the final reply is `decline` when it says Alfred can't, and `respond` otherwise.
 
 **Task states in Milestone 1.** `running`, then `awaiting_clarification` or `calling_tool` as needed, and finally `completed`, `declined`, `failed` or `canceled`. Ending a task, however it ends, revokes its grants. Milestone 1 has no consequential actions and no cloud, so the `awaiting_action_approval` and `awaiting_cloud_consent` states come later.
 
@@ -126,8 +127,8 @@ A listing leaves out hidden entries (names starting with a dot, which Finder doe
 
 | Milestone | Work | Gate |
 |---|---|---|
-| M0: inventory, contracts, threat model | The consent channel (161e2e9). This file and [THREAT_MODEL.md](THREAT_MODEL.md). The app names the model's host when it isn't this computer, and an API key from the environment goes only to its own provider's exact host. | Existing tests pass; trusted and untrusted parts and the privilege boundaries are written down. |
-| M1: read-only folder prototype | Done: the contracts, the broker and its security tests. Next: a broker-backed environment with a seeded course folder (deadlines, a conflicting date, an injection file), run with the stock model. Granting a folder in the app (first with `--grant`), a brokered live mode and an audit panel. | Legitimate reads work. An unrelated folder, a symlink escape and the injection file's requests are refused by the broker, whatever the model does. The research suite still passes. |
+| M0: inventory, contracts, threat model | The consent channel (161e2e9). This file and [THREAT_MODEL.md](THREAT_MODEL.md). The app names the model's host when it isn't this computer, and an API key from the environment goes only to its own provider's exact host. Still to do: a CI workflow that runs the tests. | Existing tests pass; trusted and untrusted parts and the privilege boundaries are written down. |
+| M1: read-only folder prototype | Done: the contracts, the broker and its security tests; a file environment with a seeded course folder (deadlines, a conflicting date, an injection file), scripted agents and a first run with the stock model. Next: granting a folder in the app (first with `--grant`), deny and allow-once screens, a brokered live mode and an audit panel. Then the gate run, with alfred-4b beside the stock model. | Legitimate reads work. An unrelated folder, a symlink escape and the injection file's requests are refused by the broker, whatever the model does. The research suite still passes. |
 | M2: OS isolation | The agent runtime behind a real OS boundary, with the broker outside it; authenticated local IPC; no network except to the broker and the model. | Tests show the boundary itself holds, not just Python checks. |
 | M3: one real integration | Calendar or email, read and draft first, then approvals bound to the exact payload. | Denial, invalidation by edits, duplicate sends, retries and postconditions are tested against a fake provider. |
 | M4: privacy bridge | Context selection, local placeholders, an outbound scan, a preview of the exact payload, a manifest, one provider. | Tests read the bytes actually sent. |

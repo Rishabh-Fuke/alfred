@@ -24,7 +24,8 @@ from ..contracts import FINAL_STATES, OPERATIONS, STATUS_OF, AuditEvent, Grant, 
 from . import catalog, fs
 from .audit import AuditLog
 
-NOT_GRANTED = "Not found, or not granted for this task. Open files and folders by the handles files__list gives you."
+NOT_GRANTED = ("Not found, or not granted for this task. Call files__list with no folder to list the granted folder, "
+               "then open entries by the handles it returns.")
 NOT_OFFERED = "That tool isn't available for this task."
 
 

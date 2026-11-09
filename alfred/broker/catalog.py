@@ -46,7 +46,8 @@ def descriptors(operations: Iterable[str], limits: Limits) -> List[dict]:
             "was last modified; files also have a size in bytes. Open entries by their handles: files__read_text "
             "for a file, files__list for a folder. Names and paths can't be used to open anything.",
             {"folder": {"type": "string",
-                        "description": "A folder's handle (res_...) from an earlier listing. Optional."}},
+                        "description": "A folder's handle (res_...) from an earlier listing, not its name. Leave it "
+                                       "out to list the granted folder."}},
             []))
     if "files.read_text" in ops:
         out.append(_fn(
