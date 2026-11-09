@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from alfred import eval as alfred_eval
-from alfred.agents.llm import _PARAM_FIXES, chat_create
+from alfred.agents.llm import _PARAM_FIXES, OpenAICompatAgent, chat_create
 from alfred.capability import choose_openai_model, pick_mode
 from alfred.report import load_rows, reliability, render_markdown, summarize
 
@@ -66,6 +66,9 @@ def test_provider_shortcuts_and_keys(monkeypatch):
     for lookalike in ("https://api.openai.com.evil.example/v1", "https://evil.example/api.tokenfactory.nebius.com/v1",
                       "http://evil.example/v1?u=api.openai.com", "http://api.openai.com/v1"):
         assert alfred_eval.resolve_endpoint(lookalike, None)[1] == "local"
+        # The same holds when the agent builds its own client.
+        assert OpenAICompatAgent("m", base_url=lookalike).client.api_key == "local"
+    assert OpenAICompatAgent("m", base_url="openai").client.api_key == "sk-test"
     a = alfred_eval.parse_args(["--no-think", "--extra-body", '{"top_k": 20}'])
     assert alfred_eval.extra_body(a) == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
 

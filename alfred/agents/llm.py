@@ -8,7 +8,6 @@ llama.cpp's server, or a hosted API. Two tool modes:
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 
@@ -157,8 +156,10 @@ class OpenAICompatAgent:
         self.seed, self.tool_mode, self.extra_body = seed, tool_mode, extra_body
         if client is None:
             from openai import OpenAI
-            env_key = os.environ.get("OPENAI_API_KEY") if "api.openai.com" in base_url else None
-            client = OpenAI(base_url=base_url, api_key=api_key or env_key or "local", timeout=timeout, max_retries=3)
+
+            from ..eval import resolve_endpoint  # here, not at the top: eval imports this module
+            base_url, key = resolve_endpoint(base_url, api_key)  # an environment key only for its own provider
+            client = OpenAI(base_url=base_url, api_key=key, timeout=timeout, max_retries=3)
         self.client = client
         self.messages: list[dict] = []
 
