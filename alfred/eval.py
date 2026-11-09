@@ -63,6 +63,20 @@ def resolve_endpoint(base_url: str, api_key: str | None) -> tuple[str, str]:
     return url, key
 
 
+def no_think_options(base_url: str) -> dict:
+    """The request options that turn reasoning off at an endpoint, given as a provider shortcut or a URL.
+
+    Ollama (the `ollama` shortcut or port 11434) ignores chat_template_kwargs and honors reasoning_effort: on 0.34.4,
+    Nemotron 3 Nano 4B wrote 74 completion tokens with the template option, the same as by default, and 26 with
+    reasoning_effort. vLLM and llama.cpp honor the template option.
+    """
+    try:
+        ollama = base_url == "ollama" or urlparse(base_url).port == 11434
+    except ValueError:  # a malformed URL: leave it to the request to fail and say why
+        ollama = False
+    return {"reasoning_effort": "none"} if ollama else {"chat_template_kwargs": {"enable_thinking": False}}
+
+
 def get_client(a):
     url, key = resolve_endpoint(a.base_url, a.api_key)
     with _clients_lock:
@@ -75,7 +89,9 @@ def get_client(a):
 def extra_body(a) -> dict | None:
     body = json.loads(a.extra_body) if a.extra_body else {}
     if a.no_think:
-        body.setdefault("chat_template_kwargs", {})["enable_thinking"] = False
+        for key, value in no_think_options(a.base_url).items():
+            # A dict adds to what --extra-body gave under that key, so other template options survive.
+            body[key] = {**body.get(key, {}), **value} if isinstance(value, dict) else value
     return body or None
 
 
@@ -89,7 +105,8 @@ def parse_args(argv=None):
                         + ". Default: ollama. tokenfactory reads its key from NEBIUS_API_KEY.")
     p.add_argument("--api-key", default=None, help="Usually unnecessary: keys are read from the environment.")
     p.add_argument("--no-think", action="store_true",
-                   help="Turn off reasoning (sends chat_template_kwargs enable_thinking=false; vLLM and most "
+                   help="Turn off reasoning. Sends reasoning_effort=none to Ollama (the ollama shortcut or port 11434) "
+                        "and chat_template_kwargs enable_thinking=false to anything else (vLLM, llama.cpp and most "
                         "vLLM-based hosts understand it).")
     p.add_argument("--extra-body", default="", help="JSON object sent with every request, for server-specific options.")
     p.add_argument("--prompt", default="plain", help="plain, privacy, or both: plain,privacy")

@@ -299,7 +299,7 @@ def build(client, out: Path, refs: list[dict], model: str = DEFAULT_MODEL, kinds
 
 
 def main(argv=None):
-    from ..eval import resolve_endpoint
+    from ..eval import no_think_options, resolve_endpoint
     from .enron import read as read_refs
     p = argparse.ArgumentParser(prog="python -m alfred.realism.build", description=__doc__.split("\n\n")[0])
     p.add_argument("--refs", default="", help="References from alfred.realism.enron (optional but recommended).")
@@ -323,7 +323,7 @@ def main(argv=None):
     unknown = set(kinds or []) - set(KINDS)
     if unknown:
         p.error(f"unknown kinds: {sorted(unknown)}")
-    extra = None if a.think else {"chat_template_kwargs": {"enable_thinking": False}}
+    extra = None if a.think else no_think_options(a.base_url)
     _, text = build(client, Path(a.out), refs, a.model, kinds, a.scale, a.per_kind, a.workers, a.seed, extra)
     print(text)
 

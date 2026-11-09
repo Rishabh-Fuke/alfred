@@ -69,7 +69,7 @@ def test_provider_shortcuts_and_keys(monkeypatch):
         # The same holds when the agent builds its own client.
         assert OpenAICompatAgent("m", base_url=lookalike).client.api_key == "local"
     assert OpenAICompatAgent("m", base_url="openai").client.api_key == "sk-test"
-    a = alfred_eval.parse_args(["--no-think", "--extra-body", '{"top_k": 20}'])
+    a = alfred_eval.parse_args(["--no-think", "--base-url", "vllm", "--extra-body", '{"top_k": 20}'])
     assert alfred_eval.extra_body(a) == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
 
 

@@ -60,7 +60,7 @@ QUICK=1 bash scripts/baseline_laptop.sh      # 1 sample, 27 tasks. Roughly an ho
 MODELS="qwen3:8b,gpt-oss:20b" bash scripts/baseline_laptop.sh
 ```
 
-LM Studio works too: `--base-url http://localhost:1234/v1`. Any OpenAI-compatible server works. `--base-url` also takes shortcuts: `ollama` (the default), `vllm` (localhost:8000), `tokenfactory` (Nebius Token Factory, key from `NEBIUS_API_KEY`) and `openai` (key from `OPENAI_API_KEY`). A key from the environment is only ever sent to its own provider. `--no-think` turns reasoning off for models that support it (Nemotron, Qwen3).
+LM Studio works too: `--base-url http://localhost:1234/v1`. Any OpenAI-compatible server works. `--base-url` also takes shortcuts: `ollama` (the default), `vllm` (localhost:8000), `tokenfactory` (Nebius Token Factory, key from `NEBIUS_API_KEY`) and `openai` (key from `OPENAI_API_KEY`). A key from the environment is only ever sent to its own provider. `--no-think` turns reasoning off for models that support it (Nemotron, Qwen3). It sends `reasoning_effort: "none"` to Ollama (the `ollama` shortcut or port 11434), which ignores the template option, and `chat_template_kwargs: {"enable_thinking": false}` to any other server, which is what vLLM and llama.cpp read.
 
 ## Nemotron on Colab
 

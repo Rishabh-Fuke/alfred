@@ -7,8 +7,6 @@ import re
 import threading
 from pathlib import Path
 
-NO_THINK = {"chat_template_kwargs": {"enable_thinking": False}}
-
 
 def client_for(base_url: str, api_key: str | None = None, timeout: float = 600.0):
     """An OpenAI client for a URL or provider shortcut (see alfred.eval.PROVIDERS), plus the resolved URL."""

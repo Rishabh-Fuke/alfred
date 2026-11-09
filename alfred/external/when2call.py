@@ -24,8 +24,9 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from ..agents.llm import chat_create, strip_think
+from ..eval import no_think_options
 from ..matching import INABILITY
-from .common import (FINISH_STATS, HARNESS, NO_THINK, bootstrap, client_for, finish_note, offered_tools, pct, read_jsonl,
+from .common import (FINISH_STATS, HARNESS, bootstrap, client_for, finish_note, offered_tools, pct, read_jsonl,
                      read_finish_as_reply, slug)
 
 DATA_URL = "https://raw.githubusercontent.com/NVIDIA/When2Call/main/data/test/when2call_test_{subset}.jsonl"
@@ -169,7 +170,7 @@ def run(a) -> Path:
     path = out / "responses.jsonl"
     done = {r["uuid"] for r in read_jsonl(path)}
     lock = threading.Lock()
-    extra = NO_THINK if a.no_think else None
+    extra = no_think_options(a.base_url) if a.no_think else None
 
     def one(item):
         try:

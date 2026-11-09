@@ -23,7 +23,7 @@ import os
 import re
 from pathlib import Path
 
-from .common import FINISH_STATS, HARNESS, NO_THINK, finish_note, offered_tools, pct, read_finish_as_reply, slug
+from .common import FINISH_STATS, HARNESS, finish_note, offered_tools, pct, read_finish_as_reply, slug
 
 CATEGORIES = ("multi_turn_base", "multi_turn_miss_param", "multi_turn_miss_func")
 NAMES = {"multi_turn_base": "Multi-turn tasks with everything available (control)",
@@ -84,11 +84,11 @@ def run(a) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     (out / "config.json").write_text(json.dumps({**vars(a), "api_key": None}, indent=2))
 
-    from ..eval import resolve_endpoint
+    from ..eval import no_think_options, resolve_endpoint
     url, key = resolve_endpoint(a.base_url, a.api_key)
     os.environ["BFCL_PROJECT_ROOT"] = str(out)  # must be set before bfcl_eval is imported
     os.environ["OPENAI_BASE_URL"], os.environ["OPENAI_API_KEY"] = url, key  # read by BFCL's OpenAI handler
-    register(name, a.model, NO_THINK if a.no_think else None)
+    register(name, a.model, no_think_options(a.base_url) if a.no_think else None)
     from bfcl_eval.__main__ import cli
 
     categories = ",".join(a.categories.split(","))

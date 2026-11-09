@@ -19,7 +19,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from .common import (FINISH_STATS, HARNESS, NO_THINK, bootstrap, client_for, count, finish_note, offered_tools, pct,
+from ..eval import no_think_options
+from .common import (FINISH_STATS, HARNESS, bootstrap, client_for, count, finish_note, offered_tools, pct,
                      read_finish_as_reply, slug)
 
 
@@ -60,7 +61,8 @@ def build_pipeline(model: str, base_url: str, api_key: str | None, no_think: boo
     from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
 
     client, _ = client_for(base_url, api_key)
-    llm = OpenAILLM(_ExtraBodyClient(client, NO_THINK if no_think else None), model, temperature=temperature)
+    extra = no_think_options(base_url) if no_think else None
+    llm = OpenAILLM(_ExtraBodyClient(client, extra), model, temperature=temperature)
     llm.name = name
     return AgentPipeline.from_config(PipelineConfig(llm=llm, model_id=None, defense=None, system_message_name=None,
                                                     system_message=load_system_message(None),

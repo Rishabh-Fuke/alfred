@@ -18,6 +18,7 @@ from pathlib import Path
 
 from ..agents.llm import OpenAICompatAgent, chat_create, strip_think
 from ..env import Environment, Observation
+from ..eval import no_think_options
 from ..gate import Gate
 from ..matching import WARNING
 from ..prompts import build_system_prompt
@@ -221,7 +222,7 @@ class Session:
 
     def _run(self, text: str, n: int) -> None:
         env = LiveEnvironment(self, text, n)
-        extra = {"chat_template_kwargs": {"enable_thinking": False}, "top_p": 0.95} if self.no_think else None
+        extra = {**no_think_options(str(self.client.base_url)), "top_p": 0.95} if self.no_think else None
         agent = OpenAICompatAgent(self.model, client=self.client, temperature=self.temperature, max_tokens=2048,
                                   tool_mode=self.tool_mode, extra_body=extra)
         try:
