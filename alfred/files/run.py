@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..broker import AuditLog, Broker
+from ..eval import no_think_options
 from .course import build
 from .env import FilesEnvironment
 from .scripted import CarefulAgent, HostileAgent
@@ -51,14 +52,6 @@ def parse_args(argv=None):
     if unknown:
         p.error(f"unknown task: {', '.join(unknown)}")
     return a
-
-
-def no_think_options(url: str) -> dict:
-    """The request options that turn reasoning off. Ollama ignores the template option and honors reasoning_effort
-    (seen on 0.34.4); vLLM takes the template option."""
-    if urlparse(url).port == 11434:
-        return {"reasoning_effort": "none"}
-    return {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 def _agent_factory(a):

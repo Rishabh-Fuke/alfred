@@ -2,6 +2,7 @@
 
     python -m alfred.app --model alfred-4b --base-url ollama          # a model served by Ollama
     python -m alfred.app --model alfred-rl --base-url vllm            # or by vLLM
+    python -m alfred.app --model alfred-4b --grant ~/School           # on a real folder, through the permission broker
 
 With a model served on this computer, everything runs here except one optional button: with --cloud and
 NEBIUS_API_KEY set, "Polish with Nemotron 3 Super" sends a pending email's subject and body (nothing else) to Token
@@ -29,11 +30,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from ..broker import AuditLog, Broker, GrantError
+from .folder import FolderSession, check_folder
 from .live import Session
 
 STATIC = Path(__file__).parent / "static"
 TOKEN_HEADER = "X-Alfred-Token"
 MAX_BODY = 1_000_000
+SIMULATED_ONLY = ("/api/polish", "/api/memory", "/api/reset")  # the simulated inbox has these; a real folder doesn't
 _SCRIPT = re.compile(rb"<script\b[^>]*>(.*?)</script>", re.S)
 
 
@@ -75,7 +79,8 @@ def make_handler(app: "App"):
             self.wfile.write(body)
 
         def _json(self, obj, code: int = 200):
-            self._send(code, json.dumps(obj, ensure_ascii=False).encode())
+            # "replace": a model can write lone surrogates, which UTF-8 can't encode, and the page has to keep working
+            self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8", "replace"))
 
         def _body(self) -> dict:
             n = int(self.headers.get("Content-Length") or 0)
@@ -127,6 +132,8 @@ def make_handler(app: "App"):
             if int(self.headers.get("Content-Length") or 0) > MAX_BODY:
                 return self._json({"error": "That's too long."}, 413)
             path, s = urlparse(self.path).path, app.session
+            if app.folder is not None and path in SIMULATED_ONLY:
+                return self._json({"error": "That's only for the simulated inbox."}, 409)
             try:
                 body = self._body()
                 if path == "/api/request":
@@ -140,6 +147,8 @@ def make_handler(app: "App"):
                     return self._json(s.polish(body["pending_id"]))
                 elif path == "/api/stop":
                     s.stop()
+                elif path == "/api/revoke" and app.folder is not None:
+                    s.revoke()
                 elif path == "/api/memory":
                     if body.get("clear"):
                         s.memory.clear()
@@ -175,6 +184,10 @@ class App:
         self.polish_client = (OpenAI(base_url="https://api.tokenfactory.nebius.com/v1/", api_key=tf_key, timeout=120)
                               if a.cloud and tf_key and not a.no_cloud else None)
         self.memory_path = Path(a.memory).expanduser() if a.memory else None
+        self.folder = Path(os.path.abspath(os.path.expanduser(a.grant))) if a.grant else None
+        self.broker = Broker(AuditLog(a.audit or None)) if a.grant else None
+        if self.folder is not None:
+            check_folder(self.folder, self.broker)
         self.reset(a.world)
 
     def listen_on(self, host: str, port: int) -> None:
@@ -183,6 +196,11 @@ class App:
         self.origins = {f"http://{h}" for h in self.hosts}
 
     def reset(self, seed: int) -> None:
+        if self.folder is not None:
+            self.session = FolderSession(self.folder, self.a.model, self.client, self.broker,
+                                         temperature=self.a.temperature, no_think=not self.a.thinking,
+                                         model_host=self.model_host)
+            return
         old = getattr(self, "session", None)
         if old and old.running:
             old.stop()
@@ -213,14 +231,28 @@ def parse_args(argv=None):
                                                        "listens on the network.")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true")
-    return p.parse_args(argv)
+    p.add_argument("--grant", metavar="FOLDER", default=None,
+                   help="Work on this folder instead of the simulated inbox, through the permission broker. Alfred can "
+                        "only read it, and the page asks you before each request.")
+    p.add_argument("--audit", default="~/.alfred-audit.jsonl",
+                   help="With --grant: the file that logs every call the broker checks (ids, operations, reasons and "
+                        "sizes, never names or contents). Empty keeps the log in memory.")
+    a = p.parse_args(argv)
+    if a.grant and a.cloud:
+        p.error("--grant can't be used with --cloud: nothing goes to the cloud when Alfred works on a real folder.")
+    if a.grant and a.tool_mode != "native":
+        p.error("--grant needs native tool calling.")
+    return a
 
 
 def serve(a) -> ThreadingHTTPServer:
     if not is_loopback(a.host):
         raise SystemExit(f"--host {a.host}: Alfred's page approves drafts, so it only listens on this computer "
                          f"(127.0.0.1).")
-    app = App(a)
+    try:
+        app = App(a)
+    except GrantError as e:
+        raise SystemExit(f"--grant: {e}") from None
     server = ThreadingHTTPServer((a.host, a.port), make_handler(app))
     app.listen_on(a.host, server.server_address[1])
     server.app = app
@@ -250,6 +282,8 @@ def main(argv=None):
     url = f"http://{a.host}:{server.server_address[1]}/#k={app.token}"
     print(f"Alfred is running with {a.model}. Open it with this link, which carries the key for this run:\n  {url}\n"
           f"Press Ctrl+C to stop.")
+    if app.folder is not None:
+        print(f"Folder: {app.folder}. Alfred can only read it, and the page asks you before each request.")
     for line in cloud_status(a, app):
         print(line)
     if not a.no_browser:

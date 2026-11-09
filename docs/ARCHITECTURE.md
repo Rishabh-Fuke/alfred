@@ -8,7 +8,7 @@ Alfred is growing from a research project (training a 4B model for judgment in a
 
 This file maps the code as it is, records the design decisions and why, and defines the contracts Milestone 1 builds on. [THREAT_MODEL.md](THREAT_MODEL.md) covers what can go wrong, and which tests show it doesn't.
 
-**Status.** The judgment engine and a simulated runtime exist. So do the broker and a file environment that reads a seeded course folder through it; the app doesn't use the broker yet. Nothing in Alfred is isolated by the operating system: it all runs in one Python process with your user's permissions. The Milestone 1 broker is an access-control prototype, and it's labeled as one.
+**Status.** The judgment engine and a simulated runtime exist. So do the broker, a file environment that reads a seeded course folder through it, and a mode of the app that works on a real folder (`--grant`). Nothing in Alfred is isolated by the operating system: it all runs in one Python process with your user's permissions. The Milestone 1 broker is an access-control prototype, and it's labeled as one.
 
 ## 1. What exists today
 
@@ -21,7 +21,7 @@ This file maps the code as it is, records the design decisions and why, and defi
 | Approval gate | [`gate.py`](../alfred/gate.py) | The only code that changes the world. It freezes a deep copy of each draft when it's submitted, and approving twice commits once. |
 | World | [`world.py`](../alfred/world.py) | One seeded, simulated person in an in-memory SQLite database. Sensitive records (lab results, therapy, a bank balance, a salary, a friend's divorce, a friend's secret, the home address and phone) carry canary strings, so a leak shows up as a string match. |
 | Simulated user and grader | [`user_sim.py`](../alfred/user_sim.py), [`checker.py`](../alfred/checker.py), [`reward.py`](../alfred/reward.py) | Answer questions and review drafts deterministically, then score the episode: clean success, overreach, leaks, injections acted on, made-up values. |
-| Live app | [`app/`](../alfred/app) | A local page where a person makes requests, answers Alfred's questions, and approves, edits or rejects each draft. It uses the same agent and environment, with the person in the simulated user's place. |
+| Live app | [`app/`](../alfred/app) | A local page where a person makes requests, answers Alfred's questions, and approves, edits or rejects each draft. It uses the same agent and environment, with the person in the simulated user's place. With `--grant FOLDER` it works on that folder instead, through the broker. |
 | Permission broker (Milestone 1) | [`broker/`](../alfred/broker), [`contracts/`](../alfred/contracts) | Grants a task read access to one folder. The model names files by handles and gets text through two read-only tools. Every call is checked against the grant and logged as metadata. Tested on its own in [`tests/security/`](../tests/security). |
 | File requests (Milestone 1) | [`files/`](../alfred/files) | A seeded course folder, School, beside a Private folder it never grants. An environment that reads School through the broker under the same agent loop, recording an agent decision per step. Four requests with checks, a careful and a hostile scripted agent, and a runner (`python -m alfred.files.run`). |
 | Evaluation | [`eval.py`](../alfred/eval.py), [`external/`](../alfred/external), [`scripts/verify_results.py`](../scripts/verify_results.py) | Runs agents on Alfred's tasks and on When2Call, BFCL and AgentDojo, and recomputes the published numbers. |
@@ -36,22 +36,32 @@ This file maps the code as it is, records the design decisions and why, and defi
 5. `ask_user` waits for the person's answer. Answers can be remembered for later requests.
 6. The run ends when the model calls `finish` or replies in plain text, after 20 model turns or 60 tool calls, or when the person presses Stop.
 
+### A request on a real folder
+
+With `--grant FOLDER` the app works on that folder instead of the simulated world ([`app/folder.py`](../alfred/app/folder.py)). The folder is checked at startup, so one Alfred can't have is reported in the terminal.
+
+1. The page posts the request. Nothing is read and the model isn't called yet.
+2. The page shows what's being asked: the folder, what access allows and forbids, its limits, how long it lasts, and where the text goes. **Allow once** is the only thing that makes a grant (origin `page`), for that request alone. Any other answer ends the request.
+3. The agent runs on a `LiveFolderEnvironment`. Every tool call goes to the broker, and the page lists each call it checked: what was read or listed, and what was refused and why. It shows names, never file text.
+4. A question waits for the person. While the grant lasts, the page has a **Revoke access** button: the next call is refused, and the page says that what was already read can't be unread.
+5. The grant ends with the request, however it ends: an answer, Stop, running out of turns, or an error.
+
 ### Where things run, and what they keep
 
 - **Processes.** One Python process holds the app server, the agent loop, the environment and the world. The model runs in its own server process (Ollama, vLLM) or on a hosted endpoint; `--base-url` decides which.
 - **Network.** The page talks to the app on 127.0.0.1. The agent talks to the model's endpoint. With `--cloud`, the Polish button talks to Token Factory. With a local model and no `--cloud`, Alfred opens no connection off the machine: `test_with_a_local_model_nothing_leaves_this_computer` records every connection a full request opens.
 - **A hosted model sees everything.** With `--base-url tokenfactory`, `openai` or any other host, every request and every record Alfred reads goes to that host. The terminal and the page say so.
-- **Disk.** Only answers to Alfred's questions: the last 20, as plain JSON in `~/.alfred-memory.json`. `--memory PATH` moves the file, `--memory ""` keeps answers in memory only, and `--no-memory` (or the page's switch) stops using and saving them. The world, the drafts and the event log live in memory and go away when the app stops.
+- **Disk.** Only answers to Alfred's questions: the last 20, as plain JSON in `~/.alfred-memory.json`. `--memory PATH` moves the file, `--memory ""` keeps answers in memory only, and `--no-memory` (or the page's switch) stops using and saving them. The world, the drafts and the event log live in memory and go away when the app stops. With `--grant`, the broker's audit log is also kept, as JSON Lines only you can read, in `~/.alfred-audit.jsonl` (`--audit PATH` moves it, `--audit ""` keeps it in memory): ids, operations, reasons and sizes, never names or contents.
 
 ## 2. From today to the three parts
 
 | Part of the design | Today | Missing | Milestone |
 |---|---|---|---|
 | Judgment engine | The agent loop drives any environment with the interface above, the file environment included. First runs with the stock model on the course folder. | The Milestone 1 gate: repeated runs, with alfred-4b beside the stock model | M1 |
-| Grants and resource handles | The broker: grants, handles, expiry, revocation and budgets over a real folder. In the simulation, `read_policy="enforce"` refuses records a task doesn't need. | The app using the broker | M1 |
-| Consent | The gate freezes drafts and is the only writer; the page is the only approver | Granting a folder from the page (M1); binding each approval to a digest of the exact payload (M3) | M1, M3 |
-| File access | Read-only `files.list` and `files.read_text` through the broker, offered by the file environment on a seeded course folder | The app granting a folder the person chooses | M1 |
-| Audit | The page's in-memory event list, with full arguments. The broker's log: metadata only, in memory or as JSON Lines. | The app keeping the broker's log and showing it | M1 |
+| Grants and resource handles | The broker: grants, handles, expiry, revocation and budgets over a real folder. In the simulation, `read_policy="enforce"` refuses records a task doesn't need. | Remembered grants, and more than one folder | Later |
+| Consent | The gate freezes drafts and is the only writer; the page is the only approver. With `--grant`, the page allows or refuses folder access before each request. | A folder picker on the page (M1 uses `--grant`); binding each approval to a digest of the exact payload (M3) | M3 |
+| File access | Read-only `files.list` and `files.read_text` through the broker, in the file environment and the app's `--grant` mode | PDFs and documents, in a resource-limited subprocess | Later |
+| Audit | The page's in-memory event list, with full arguments. The broker's log: metadata only, in memory or as JSON Lines. | Nothing for Milestone 1 | |
 | Isolation | None: one process with the user's permissions | An OS sandbox around the agent runtime | M2 |
 | Real accounts | None: the world is simulated | One narrow integration, read and draft first | M3 |
 | Privacy bridge | Polish sends one draft's subject and body to Token Factory, only with `--cloud` | A preview of the exact payload, an outbound scan, a manifest, placeholders | M4 |
@@ -77,7 +87,7 @@ This file maps the code as it is, records the design decisions and why, and defi
 
 **D5. Milestone 1 reads plain text only.** The untrusted bytes are file contents, and parsers are where they do damage. Milestone 1 reads UTF-8 text files with size limits and no third-party parser. PDFs and documents come later, in a resource-limited subprocess.
 
-**D6. Cloud is off by default, and Alfred says where the model runs.** The Polish button needs `--cloud` as well as a key (161e2e9). A hosted `--base-url` sends everything to that host, so the terminal and the page name the host whenever the model isn't on this computer.
+**D6. Cloud is off by default, and Alfred says where the model runs.** The Polish button needs `--cloud` as well as a key (161e2e9). A hosted `--base-url` sends everything to that host, so the terminal and the page name the host whenever the model isn't on this computer. With `--grant` the app refuses `--cloud`, and the consent card says where the text goes.
 
 **D7. The research code stays as it is.** The broker and the new environment are additions. The simulated world, the tasks, the grader, training and evaluation keep working unchanged, and their tests keep passing.
 
@@ -97,7 +107,7 @@ This file maps the code as it is, records the design decisions and why, and defi
 | `operations` | A subset of `files.list` and `files.read_text` |
 | `limits` | Starting defaults: listing depth 5, 200 entries per listing, files over 2 MB refused unread, 6,000 characters per read (at most 20,000), and 10 MB of text and 200 calls per grant. The byte budget is checked before each read, so the last read can go past it. |
 | `expires_at` | 30 minutes after it's granted |
-| `origin` | `page` or `cli`. A grant never comes from model output, a tool result or file content. |
+| `origin` | `page` (the app, after **Allow once**) or `cli` (the command-line runner). A grant never comes from model output, a tool result or file content. |
 | `revoked_at` | Set when the person revokes it or the task ends. Checked on every call, not only when the grant is made. |
 
 A task holds one live grant at a time. The broker refuses to grant the home folder or any folder above it: the person grants the folder Alfred needs. The path the person gives is theirs, so links in it are followed; nothing below it is.
@@ -121,14 +131,14 @@ A listing leaves out hidden entries (names starting with a dot, which Finder doe
 
 **Agent decision.** Derived by the adapter (D2) from each step, with `schema_version`, `task_id`, the decision, and the one field that goes with it: `tool_request`, `proposed_action`, `user_question`, `message` (the answer, or why Alfred declined) or `delegation_proposal`. A decision without its field, or with another's, is rejected. It feeds the audit panel and the task's state; nothing executes because of it. The file environment records one per step: a call to any tool but the two conversation tools is `request_tool`, even one that doesn't exist, and goes to the broker; a question is `ask_user`; the final reply is `decline` when it says Alfred can't, and `respond` otherwise.
 
-**Task states in Milestone 1.** `running`, then `awaiting_clarification` or `calling_tool` as needed, and finally `completed`, `declined`, `failed` or `canceled`. Ending a task, however it ends, revokes its grants. Milestone 1 has no consequential actions and no cloud, so the `awaiting_action_approval` and `awaiting_cloud_consent` states come later.
+**Task states in Milestone 1.** `running`, then `awaiting_clarification` or `calling_tool` as needed, and finally `completed`, `declined`, `failed` or `canceled`. Ending a task, however it ends, revokes its grants. Milestone 1 has no consequential actions and no cloud, so the `awaiting_action_approval` and `awaiting_cloud_consent` states come later. In the app, consent comes before the task starts, so there's no `awaiting_permission` state yet.
 
 ## 5. Milestones
 
 | Milestone | Work | Gate |
 |---|---|---|
 | M0: inventory, contracts, threat model | The consent channel (161e2e9). This file and [THREAT_MODEL.md](THREAT_MODEL.md). The app names the model's host when it isn't this computer, and an API key from the environment goes only to its own provider's exact host. Still to do: a CI workflow that runs the tests. | Existing tests pass; trusted and untrusted parts and the privilege boundaries are written down. |
-| M1: read-only folder prototype | Done: the contracts, the broker and its security tests; a file environment with a seeded course folder (deadlines, a conflicting date, an injection file), scripted agents and a first run with the stock model. Next: granting a folder in the app (first with `--grant`), deny and allow-once screens, a brokered live mode and an audit panel. Then the gate run, with alfred-4b beside the stock model. | Legitimate reads work. An unrelated folder, a symlink escape and the injection file's requests are refused by the broker, whatever the model does. The research suite still passes. |
+| M1: read-only folder prototype | Done: the contracts, the broker and its security tests; a file environment with a seeded course folder (deadlines, a conflicting date, an injection file), scripted agents and a first run with the stock model; `--grant` in the app, with allow-once and deny on the page, a brokered live mode, revoking, and an audit panel. Next: the gate run, with alfred-4b beside the stock model. | Legitimate reads work. An unrelated folder, a symlink escape and the injection file's requests are refused by the broker, whatever the model does. The research suite still passes. |
 | M2: OS isolation | The agent runtime behind a real OS boundary, with the broker outside it; authenticated local IPC; no network except to the broker and the model. | Tests show the boundary itself holds, not just Python checks. |
 | M3: one real integration | Calendar or email, read and draft first, then approvals bound to the exact payload. | Denial, invalidation by edits, duplicate sends, retries and postconditions are tested against a fake provider. |
 | M4: privacy bridge | Context selection, local placeholders, an outbound scan, a preview of the exact payload, a manifest, one provider. | Tests read the bytes actually sent. |

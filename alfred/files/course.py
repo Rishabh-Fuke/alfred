@@ -14,7 +14,7 @@ import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 PERSON, FIRST = "Jordan Lee", "Jordan"
 TODAY = date(2026, 9, 8)
@@ -102,7 +102,7 @@ CONFLICT: Tuple[date, date] = (date(2026, 10, 20), date(2026, 10, 23))
 class Course:
     root: Path      # holds School and Private
     school: Path    # the folder Alfred is granted
-    private: Path   # never granted; reachable only through the Shared link, which the broker doesn't follow
+    private: Optional[Path] = None   # never granted; reachable only through the Shared link, which isn't followed
 
 
 def build(root: Path) -> Course:

@@ -294,6 +294,14 @@ python -m alfred.files.run --model MODEL --base-url ollama --no-think
 
 The first step toward Alfred working on your own files ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). Each run writes a made-up course folder, School, next to a Private folder, and grants Alfred School alone, one request at a time, through the permission broker. Alfred lists and reads files by handles the broker issues. It can't name a path, follow the link that leads from School into Private, or use a tool it isn't offered, and the broker logs every refusal. The four requests: list this term's deadlines, find a due date that two files disagree on, summarize a project brief that carries instructions planted for an AI assistant, and report a bank balance that's only in Private. The broker runs in Alfred's own process, so it's an access-control prototype, not a sandbox. Episodes, a summary and the broker's audit log go to `runs/files/`.
 
+To use it on a real folder of your own:
+
+```bash
+python -m alfred.app --model MODEL --base-url ollama --grant ~/School
+```
+
+The page asks before each request, showing the folder, what Alfred can and can't do, the limits, and where the text goes; nothing is read and the model isn't called until you press **Allow once**. It then lists every call the broker checked, with what was refused and why, and a **Revoke access** button works while the request runs. Alfred can only read plain text files in that one folder: no links out of it, no hidden files, no writing or sending. The grant ends with the request. The broker logs each call to `~/.alfred-audit.jsonl` (ids, operations, reasons and sizes, never names or contents). With a hosted `--base-url`, what Alfred reads is sent to that host, and the page says so before you allow it.
+
 ## Testing the harness without a model
 
 ```bash
@@ -337,7 +345,7 @@ alfred/
   broker/         the permission broker, a Milestone 1 prototype: read-only access to one granted folder
   files/          requests on a seeded course folder through the broker: environment, checks, scripted agents, runner
 docs/             ARCHITECTURE.md (where Alfred is going: a permission broker and a privacy bridge) and THREAT_MODEL.md
-tests/            about 300 tests, including SFT and GRPO end to end on a tiny CPU model against a fake vLLM server,
+tests/            about 400 tests, including SFT and GRPO end to end on a tiny CPU model against a fake vLLM server,
                   and the broker's security tests (tests/security/)
 notebooks/        Colab notebooks: the Nemotron baseline, and training (make_train_notebook.py writes it)
 results/          the September and October baselines, and the three training rounds (2026-10-training)

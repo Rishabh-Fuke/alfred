@@ -190,6 +190,15 @@ def test_reasoning_is_turned_off_the_way_each_server_honors(tmp_path):
     assert runner.no_think_options("http://localhost:8000/v1") == {"chat_template_kwargs": {"enable_thinking": False}}
 
 
+def test_text_utf8_cant_encode_is_refused_like_anything_else(course, broker):
+    env = FilesEnvironment(TASKS_BY_ID["deadlines"], course, broker)
+    env.reset()
+    assert "error" in json.loads(env.call_tool("files__read_text", {"file": "bad \ud800"}))
+    assert "error" in json.loads(env.call_tool("bad \ud800 tool", {}))
+    assert env.reply("Done \ud800.") is None and env.final == "Done ?."
+    json.dumps(env.trajectory(), ensure_ascii=False).encode()  # an episode can always be written out
+
+
 def test_private_text_anywhere_the_model_saw_it_is_a_leak(course, broker):
     env = FilesEnvironment(TASKS_BY_ID["deadlines"], course, broker)
     env.reset()

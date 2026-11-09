@@ -96,6 +96,16 @@ main { display: flex; flex-direction: column; min-height: 0; }
 .record .detail dt { color: var(--muted); }
 .record .detail dd { margin: 0; overflow-wrap: anywhere; }
 .folder { font-size: 11.5px; color: var(--faint); margin-left: 6px; font-weight: 400; }
+[hidden] { display: none !important; }
+.folder-panel { padding: 18px 20px 28px; overflow-y: auto; flex: 1; }
+.folder-panel h2 { font-family: var(--serif); font-weight: 600; font-size: 20px; margin: 0; overflow-wrap: anywhere; }
+.folder-panel h3 { font-size: 13.5px; font-weight: 600; margin: 22px 0 8px; }
+.folder-panel .path { color: var(--muted); font-size: 13px; margin: 2px 0 0; overflow-wrap: anywhere; }
+.folder-panel ul { margin: 0; padding: 0 0 0 16px; font-size: 14px; color: var(--muted); }
+.folder-panel li { margin: 0 0 6px; }
+.access { font-size: 14px; margin: 0 0 10px; color: var(--muted); }
+.access.live { color: var(--sage); font-weight: 600; }
+.touched li.refused { color: var(--seal); }
 .world-note { padding: 8px 18px 14px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--rule); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .legend span::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
@@ -258,6 +268,7 @@ main { display: flex; flex-direction: column; min-height: 0; }
     <symbol id="i-hand" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 12 12 4" stroke="currentColor" stroke-width="1.5"/></symbol>
     <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 1.6 13.4 3.6v4.1c0 3.2-2.2 5.6-5.4 6.7-3.2-1.1-5.4-3.5-5.4-6.7V3.6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 5v3.4M8 10.6v.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-wait" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5V8l2.4 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-file" viewBox="0 0 16 16"><path d="M4 1.8h5.2L12.5 5v9.2H4z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
   </defs>
 </svg>
 <div class="app">
@@ -282,6 +293,7 @@ main { display: flex; flex-direction: column; min-height: 0; }
     <div class="world-note">
       <div class="legend"><span class="l-seen">Alfred opened this</span><span class="l-private">Private</span></div>
     </div>
+    <section class="folder-panel" id="folder-panel" hidden></section>
   </aside>
 
   <main>
@@ -310,10 +322,12 @@ main { display: flex; flex-direction: column; min-height: 0; }
     <p class="small scope" id="scope">Your last request will show up here.</p>
     <dl class="tally" id="tally"></dl>
     <ul class="touched" id="touched"></ul>
-    <h3>What Alfred remembers</h3>
-    <label class="switch"><input type="checkbox" id="use-memory"> Use answers from earlier conversations</label>
-    <ul class="memory" id="memory"></ul>
-    <button class="btn quiet" id="forget" type="button">Forget everything</button>
+    <div id="memory-section">
+      <h3>What Alfred remembers</h3>
+      <label class="switch"><input type="checkbox" id="use-memory"> Use answers from earlier conversations</label>
+      <ul class="memory" id="memory"></ul>
+      <button class="btn quiet" id="forget" type="button">Forget everything</button>
+    </div>
     <div class="privacy" id="privacy"></div>
   </aside>
 </div>
@@ -400,9 +414,10 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
 
 async function loadWorld() {
   const w = state.world = await api("/api/world");
+  $("#runs-on span:last-child").textContent = w.model_host ? `${w.model}, at ${w.model_host}` : `${w.model}, on this computer`;
+  if (w.mode === "folder") return showFolder(w);
   state.names = Object.fromEntries(w.contacts.map((c) => [c.email, c.name]));
   $("#whose").innerHTML = `Working on <b>${esc(w.user.name)}</b>'s email, calendar and contacts (a simulated person). Today is ${esc(w.now)}.`;
-  $("#runs-on span:last-child").textContent = w.model_host ? `${w.model}, at ${w.model_host}` : `${w.model}, on this computer`;
   const suggestions = $("#suggestions");  // gone once the first request starts
   if (suggestions) suggestions.innerHTML = w.suggestions.map((s) =>
     `<li><button class="suggestion" data-text="${esc(s.text)}"><span class="say">${esc(s.text)}</span><span class="why">${esc(s.why)}</span></button></li>`).join("");
@@ -415,6 +430,38 @@ async function loadWorld() {
       : `<strong>Private by default.</strong> Alfred and your data stay on this computer. Nothing is sent anywhere else.`;
   renderRecords();
 }
+/* Alfred on a real folder: what it may do right now, and the button that takes that away. */
+function showFolder(w) {
+  const name = w.folder.name, g = w.grant;
+  $("#whose").innerHTML = `Working on your folder <b>${esc(name)}</b>. Alfred can only read it, and asks you before each request.`;
+  document.querySelectorAll(".tabs, #records, .world-note, #memory-section").forEach((el) => (el.hidden = true));
+  $("#open-world").textContent = "Folder";
+  $("#ask-input").placeholder = `Ask about ${name}…`;
+  const panel = $("#folder-panel");
+  panel.hidden = false;
+  panel.innerHTML = `<h2>${esc(name)}</h2><p class="path">${esc(w.folder.path)}</p>
+    <h3>Alfred's access right now</h3>
+    ${g ? `<p class="access live">Allowed for this request, until ${esc(g.until)} at the latest.</p><button class="btn" id="revoke" type="button">Revoke access</button>`
+        : `<p class="access">None. Alfred asks you before each request.</p>`}
+    <h3>What access allows</h3>
+    <ul><li>${esc(w.allows.can)}</li><li>${esc(w.allows.limits)}</li></ul>
+    <h3>What it never allows</h3>
+    <ul><li>${esc(w.allows.cant)}</li></ul>`;
+  const empty = $("#empty");
+  if (empty) {
+    $("h2", empty).textContent = `What should Alfred look up in ${name}?`;
+    $("p", empty).textContent = "Alfred asks before it reads anything, can only read this one folder, and tells you when something isn't there.";
+    $("#suggestions").innerHTML = "";
+  }
+  $("#privacy").innerHTML = (w.model_host
+    ? `<strong>Not on this computer.</strong> Alfred's model runs at ${esc(w.model_host)}, so your requests and everything Alfred reads are sent there.`
+    : `<strong>Stays on this computer.</strong> Alfred's model runs here, and what it reads goes nowhere else.`)
+    + (w.audit_path ? ` The broker logs each call to ${esc(w.audit_path)}: ids, operations, reasons and sizes, never names or contents.` : "");
+}
+$("#folder-panel").addEventListener("click", async (e) => {
+  if (!e.target.closest("#revoke")) return;
+  try { await api("/api/revoke", {}); poll(true); } catch (err) { showProblem(err.message); }
+});
 function renderMemory() {
   const items = state.world?.memory || [];
   $("#memory").innerHTML = items.length ? items.slice().reverse().map((m) =>
@@ -426,13 +473,23 @@ $("#forget").addEventListener("click", async () => { await api("/api/memory", {c
 
 /* ---------- the ledger for the current request ---------- */
 function resetTally() {
-  state.tally = {opened: [], private: [], sent: 0, declined: 0, asked: 0, flags: 0};
+  state.tally = {opened: [], private: [], sent: 0, declined: 0, asked: 0, flags: 0, read: 0, listed: 0, refused: 0, bytes: 0, calls: []};
   renderTally();
 }
 function renderTally() {
   const t = state.tally;
   if (!t) { $("#tally").innerHTML = ""; return; }
   $("#scope").textContent = "For your last request.";
+  if (state.world?.mode === "folder") {
+    $("#tally").innerHTML = `
+      <dt>Files read</dt><dd>${t.read}</dd>
+      <dt>Folders listed</dt><dd>${t.listed}</dd>
+      <dt>Refused by the broker</dt><dd class="${t.refused ? "bad" : "good"}">${t.refused}</dd>
+      <dt>Text read</dt><dd>${t.bytes < 1000 ? t.bytes + " B" : (t.bytes / 1000).toFixed(1) + " KB"}</dd>
+      <dt>Questions it asked you</dt><dd>${t.asked}</dd>`;
+    $("#touched").innerHTML = t.calls.map((c) => `<li class="${c.cls}">${esc(c.text)}</li>`).join("");
+    return;
+  }
   $("#tally").innerHTML = `
     <dt>Records opened</dt><dd>${t.opened.length}</dd>
     <dt>Private records opened</dt><dd class="${t.private.length ? "priv" : "good"}">${t.private.length}</dd>
@@ -492,6 +549,87 @@ function onResult(ev) {
   } else {
     $(".res", li).textContent = ev.text ? `(${ev.text})` : "";
   }
+}
+
+/* Each call the broker checked, in the words the person reads. */
+const REFUSED = {no_grant: "no access", unknown_handle: "not something Alfred was given", expired: "access expired",
+  revoked: "access revoked", unknown_operation: "not a tool Alfred has", not_granted: "not allowed", symlink: "it's a link",
+  hard_link: "it has another name on this computer", other_device: "it's on another disk", changed: "it changed after it was listed",
+  too_deep: "too deep in the folder", too_large: "too large", not_text: "not a text file", budget: "over the limit",
+  wrong_kind: "wrong kind of entry", bad_arguments: "a malformed call", io_error: "couldn't open it"};
+function onFileCall(ev) {
+  const what = ev.tool === "files__list" ? "Listing a folder" : ev.tool === "files__read_text" ? "Reading a file" : `Trying ${ev.tool}`;
+  const li = document.createElement("li");
+  li.className = "step working";
+  li.innerHTML = `${icon(ev.tool === "files__list" ? "search" : "file")}<span><span class="what">${esc(what)}</span> <span class="res"></span></span>`;
+  trail().appendChild(li);
+  state.steps.last = li;
+}
+function onFileResult(ev) {
+  const li = state.steps.last, t = state.tally;
+  if (!li) return;
+  li.classList.remove("working");
+  if (ev.status !== "ok") {
+    const why = REFUSED[ev.reason] || ev.reason;
+    const named = /^res_[0-9a-f]{32}$/.test(ev.target || "") ? "something it listed" : ev.target;  // a handle means nothing to a person
+    const target = named || ev.tool;
+    li.classList.add("error");
+    $(".what", li).textContent = !named ? `Tried ${ev.tool}` : named === ev.target ? `Tried to open “${named}”` : `Tried to open ${named}`;
+    $(".res", li).textContent = `Refused: ${why}`;
+    t.refused++;
+    t.calls.push({cls: "refused", text: `Refused: ${target} (${why})`});
+  } else if (ev.kind === "list") {
+    const name = ev.path === "." ? state.world.folder.name : ev.path;
+    $(".what", li).textContent = `Listed ${name}`;
+    $(".res", li).textContent = `(${ev.entries} ${ev.entries === 1 ? "entry" : "entries"}${ev.skipped ? `, ${ev.skipped} left out` : ""})`;
+    t.listed++;
+    t.calls.push({cls: "", text: `Listed ${name}`});
+  } else {
+    li.classList.add("opened");
+    $(".what", li).textContent = `Read ${ev.path}`;
+    $(".res", li).textContent = ev.truncated ? "(the first part)" : "";
+    t.read++;
+    t.bytes += ev.bytes;
+    t.calls.push({cls: "", text: `Read ${ev.path}`});
+  }
+  renderTally();
+}
+function onConsent(ev) {
+  const div = document.createElement("div");
+  div.className = "slip";
+  div.dataset.pending = ev.pending_id;
+  div.innerHTML = `<div class="slip-head">${icon("shield")}<span>Alfred is asking to read a folder</span></div>
+    <div class="slip-body"><dl class="fields">
+      <dt>Folder</dt><dd>${esc(ev.name)}<br>${esc(ev.path)}</dd>
+      <dt>It can</dt><dd>${esc(ev.can)}</dd>
+      <dt>It can't</dt><dd>${esc(ev.cant)}</dd>
+      <dt>Limits</dt><dd>${esc(ev.limits)}</dd>
+      <dt>Until</dt><dd>${esc(ev.until)}</dd>
+      <dt>Privacy</dt><dd>${esc(ev.where)}</dd>
+    </dl></div>
+    <div class="slip-actions">
+      <button class="btn primary" data-act="allow">Allow once</button>
+      <span class="grow"></span>
+      <button class="btn quiet" data-act="deny">Don't allow</button>
+    </div>`;
+  state.slips[ev.pending_id] = {ev, el: div};
+  outcome().appendChild(div);
+  div.addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act) respond(ev.pending_id, {allow: act === "allow"});
+  });
+  scrollDown();
+}
+function onConsentDecision(ev) {
+  const line = document.createElement("div");
+  line.className = "settled";
+  line.innerHTML = `<span class="stamp ${ev.allowed ? "sent" : "not"} fresh">${ev.allowed ? "Allowed once" : "Not allowed"}</span><span class="gist">${ev.allowed ? "For this request only." : "Alfred read nothing."}</span>`;
+  const div = state.slips[ev.pending_id]?.el;
+  div ? div.replaceWith(line) : outcome().appendChild(line);
+}
+function onRevoked() {
+  showProblem("You revoked Alfred's access. It can't read anything more for this request, and what it already read can't be unread.");
+  loadWorld();
 }
 
 function people(list) { return (list || []).map((x) => state.names[x] ? `${state.names[x]} <${x}>` : x).join(", "); }
@@ -656,6 +794,8 @@ function onError(ev) { showProblem(`Alfred stopped: ${ev.message}. Is the model 
 
 const HANDLERS = {request: (e) => newTurn(e.text), call: onCall, result: onResult, approval: onApproval,
   decision: onDecision, question: onQuestion, answer: onAnswer, final: onFinal, polish: onPolish, error: onError,
+  file_call: onFileCall, file_result: onFileResult, consent: onConsent, consent_decision: onConsentDecision,
+  access: () => { loadWorld(); }, revoked: onRevoked,
   done: () => { loadWorld(); }};
 
 function scrollDown() { const t = $("#thread"); t.scrollTo({top: t.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"}); }

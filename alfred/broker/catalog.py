@@ -62,6 +62,17 @@ def descriptors(operations: Iterable[str], limits: Limits) -> List[dict]:
     return out
 
 
+def clean(value: Any) -> Any:
+    """Model output as valid text. JSON can carry lone surrogates, which UTF-8 can't encode and the contracts refuse."""
+    if isinstance(value, str):
+        return value.encode("utf-8", "replace").decode("utf-8")
+    if isinstance(value, dict):
+        return {clean(k): clean(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [clean(v) for v in value]
+    return value
+
+
 def parse_arguments(arguments: Any) -> Dict[str, Any]:
     """A tool call's arguments as a dict: the model may send a JSON string, nothing, or an object."""
     if arguments is None or arguments == "":
@@ -73,7 +84,7 @@ def parse_arguments(arguments: Any) -> Dict[str, Any]:
             raise BadArguments("The arguments aren't valid JSON.") from None
     if not isinstance(arguments, dict):
         raise BadArguments("The arguments must be a JSON object.")
-    return dict(arguments)
+    return clean(dict(arguments))
 
 
 def split_handle(operation: str, arguments: Dict[str, Any]) -> Tuple[Optional[str], Dict[str, Any]]:

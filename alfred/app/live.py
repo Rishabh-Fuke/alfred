@@ -173,22 +173,16 @@ def _loads(text):
         return {}
 
 
-class Session:
-    def __init__(self, seed: int, model: str, client, tool_mode: str = "native", temperature: float = 0.3,
-                 no_think: bool = True, memory_path: Path | None = None, use_memory: bool = True,
-                 polish_client=None):
-        self.seed, self.model, self.client, self.tool_mode = seed, model, client, tool_mode
-        self.temperature, self.no_think, self.use_memory = temperature, no_think, use_memory
-        self.polish_client = polish_client
-        self.world = World.generate(seed, tuple(EXTRAS))  # extras add a few records; the base world is unchanged
-        self.memory = Memory(memory_path)
+class Conversation:
+    """One person's requests, one at a time: the event log the page polls, and whatever is waiting on them."""
+
+    def __init__(self):
         self.events: list[dict] = []
         self.pending: Pending | None = None
         self.running = False
         self.lock = threading.Lock()
         self._ids = itertools.count(1)
         self._requests = itertools.count(1)
-        self._private: set[str] | None = None
         self.stop_requested = False
 
     # --- events the page polls --------------------------------------------------------------------------------
@@ -203,11 +197,6 @@ class Session:
         with self.lock:
             return [e for e in self.events if e["id"] > since]
 
-    def private_ids(self) -> set[str]:
-        if self._private is None:
-            self._private = self.world.sensitive_ids()
-        return self._private
-
     # --- running a request ------------------------------------------------------------------------------------
 
     def start(self, text: str) -> None:
@@ -221,25 +210,7 @@ class Session:
         threading.Thread(target=self._run, args=(text, n), daemon=True).start()
 
     def _run(self, text: str, n: int) -> None:
-        env = LiveEnvironment(self, text, n)
-        extra = {**no_think_options(str(self.client.base_url)), "top_p": 0.95} if self.no_think else None
-        agent = OpenAICompatAgent(self.model, client=self.client, temperature=self.temperature, max_tokens=2048,
-                                  tool_mode=self.tool_mode, extra_body=extra)
-        try:
-            agent.run(env)
-            if not env.done or env.truncated:
-                self.emit("final", status="stopped", message="Alfred stopped without finishing.", warned=False)
-        except _Stopped:
-            self.emit("final", status="stopped", message="Stopped.", warned=False)
-        except Exception as e:  # noqa: BLE001 - show the problem on the page, keep the app running
-            self.emit("error", message=f"{type(e).__name__}: {e}"[:500])
-        finally:
-            touched = {"opened": list(env.opened), "private_opened": [r for r in env.opened if r in self.private_ids()],
-                       "drafts": len(env.gate.actions) if env.world else 0,
-                       "approved": sum(a.status == "approved" for a in env.gate.actions) if env.world else 0}
-            self.emit("done", **touched)
-            with self.lock:
-                self.running, self.pending = False, None
+        raise NotImplementedError
 
     def wait_for(self, kind: str, payload: dict) -> dict:
         """Called from the agent's thread: show the page a draft or a question and wait for the person. The id can't be
@@ -265,6 +236,45 @@ class Session:
 
     def stop(self) -> None:
         self.stop_requested = True
+
+
+class Session(Conversation):
+    def __init__(self, seed: int, model: str, client, tool_mode: str = "native", temperature: float = 0.3,
+                 no_think: bool = True, memory_path: Path | None = None, use_memory: bool = True,
+                 polish_client=None):
+        super().__init__()
+        self.seed, self.model, self.client, self.tool_mode = seed, model, client, tool_mode
+        self.temperature, self.no_think, self.use_memory = temperature, no_think, use_memory
+        self.polish_client = polish_client
+        self.world = World.generate(seed, tuple(EXTRAS))  # extras add a few records; the base world is unchanged
+        self.memory = Memory(memory_path)
+        self._private: set[str] | None = None
+
+    def private_ids(self) -> set[str]:
+        if self._private is None:
+            self._private = self.world.sensitive_ids()
+        return self._private
+
+    def _run(self, text: str, n: int) -> None:
+        env = LiveEnvironment(self, text, n)
+        extra = {**no_think_options(str(self.client.base_url)), "top_p": 0.95} if self.no_think else None
+        agent = OpenAICompatAgent(self.model, client=self.client, temperature=self.temperature, max_tokens=2048,
+                                  tool_mode=self.tool_mode, extra_body=extra)
+        try:
+            agent.run(env)
+            if not env.done or env.truncated:
+                self.emit("final", status="stopped", message="Alfred stopped without finishing.", warned=False)
+        except _Stopped:
+            self.emit("final", status="stopped", message="Stopped.", warned=False)
+        except Exception as e:  # noqa: BLE001 - show the problem on the page, keep the app running
+            self.emit("error", message=f"{type(e).__name__}: {e}"[:500])
+        finally:
+            touched = {"opened": list(env.opened), "private_opened": [r for r in env.opened if r in self.private_ids()],
+                       "drafts": len(env.gate.actions) if env.world else 0,
+                       "approved": sum(a.status == "approved" for a in env.gate.actions) if env.world else 0}
+            self.emit("done", **touched)
+            with self.lock:
+                self.running, self.pending = False, None
 
     # --- the cloud handoff --------------------------------------------------------------------------------------
 

@@ -83,6 +83,18 @@ def test_ask_then_approve_changes_the_world_and_is_remembered(app):
     assert world["memory"] and any(e["subject"] == "Lunch on Friday?" for e in world["emails"] if e["folder"] == "sent")
 
 
+def test_text_utf8_cant_encode_doesnt_stop_the_page(app):
+    base, application, _ = app
+    application.session.emit("note", text="bad \ud800 text")  # a model can write this, and JSON carries it
+    status, out = _call(base, "/api/events?since=0")
+    assert status == 200 and out["events"][-1]["text"] == "bad ? text"
+
+
+def test_revoking_is_only_for_a_folder(app):
+    base, _, _ = app
+    assert _call(base, "/api/revoke", {})[0] == 404
+
+
 def test_rejecting_sends_the_feedback_back(app):
     base, application, _ = app
     task = next(t for t in generate_tasks(1000, 1) if t.template == "reply_with_info")
